@@ -1,5 +1,6 @@
 import io
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -34,6 +35,9 @@ TRAINING_SLIDES_FOLDER = os.path.join(
 )
 ALLOWED_EXTENSIONS = {"pdf", "doc", "docx", "txt", "png", "jpg", "jpeg"}
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
+ALLOWED_VIDEO_EXTENSIONS = {"mp4", "webm", "ogg", "mov"}
+ALLOWED_MEDIA_EXTENSIONS = ALLOWED_IMAGE_EXTENSIONS | ALLOWED_VIDEO_EXTENSIONS
+MAX_MEDIA_BYTES = 50 * 1024 * 1024  # 50 MB per image/video
 
 UPLOADS_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
 
@@ -52,13 +56,24 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def allowed_image(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+def allowed_media(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_MEDIA_EXTENSIONS
+
+
+def media_kind_for(filename):
+    ext = filename.rsplit(".", 1)[1].lower()
+    return "video" if ext in ALLOWED_VIDEO_EXTENSIONS else "image"
+
+
+def guess_mimetype(filename, fallback=None):
+    return mimetypes.guess_type(filename)[0] or fallback or "application/octet-stream"
 
 
 def save_slides(db, module_id, files, captions=None):
-    """Save uploaded image files as slides for a training module. `captions`, if given,
-    is matched to `files` by position. Returns count added."""
+    """Save uploaded image/video files as slides for a training module, storing the
+    bytes directly in the database (not on disk) so they survive on hosts with an
+    ephemeral filesystem. `captions`, if given, is matched to `files` by position.
+    Returns count added."""
     captions = captions or []
     max_order = db.execute(
         "SELECT COALESCE(MAX(sort_order), -1) FROM training_slides WHERE module_id = ?",
@@ -68,16 +83,20 @@ def save_slides(db, module_id, files, captions=None):
     for i, f in enumerate(files):
         if not f or not f.filename:
             continue
-        if not allowed_image(f.filename):
+        if not allowed_media(f.filename):
+            continue
+        data = f.read()
+        if not data or len(data) > MAX_MEDIA_BYTES:
             continue
         max_order += 1
-        ext = f.filename.rsplit(".", 1)[1].lower()
-        stored_name = f"{secrets.token_hex(8)}.{ext}"
-        f.save(os.path.join(TRAINING_SLIDES_FOLDER, stored_name))
+        mimetype = f.mimetype or guess_mimetype(f.filename)
+        kind = media_kind_for(f.filename)
         caption = captions[i].strip() if i < len(captions) and captions[i].strip() else None
         db.execute(
-            "INSERT INTO training_slides (module_id, image_path, caption, sort_order) VALUES (?, ?, ?, ?)",
-            (module_id, stored_name, caption, max_order),
+            """INSERT INTO training_slides
+               (module_id, image_path, caption, sort_order, media_data, media_mimetype, media_kind)
+               VALUES (?, '', ?, ?, ?, ?, ?)""",
+            (module_id, caption, max_order, data, mimetype, kind),
         )
         added += 1
     return added
@@ -1662,20 +1681,33 @@ def duplicate_training_slide(slide_id):
         (module_id,),
     ).fetchone()[0]
 
+    # Legacy file-based slides (rare now — new uploads store bytes in the DB directly).
     new_image_path = slide["image_path"]
     if new_image_path:
         src = os.path.join(TRAINING_SLIDES_FOLDER, new_image_path)
         ext = new_image_path.rsplit(".", 1)[-1]
-        new_image_path = f"{secrets.token_hex(8)}.{ext}"
+        candidate = f"{secrets.token_hex(8)}.{ext}"
         try:
-            shutil.copyfile(src, os.path.join(TRAINING_SLIDES_FOLDER, new_image_path))
+            shutil.copyfile(src, os.path.join(TRAINING_SLIDES_FOLDER, candidate))
+            new_image_path = candidate
         except OSError:
-            new_image_path = slide["image_path"]
+            pass
 
     cur = db.execute(
-        """INSERT INTO training_slides (module_id, image_path, caption, background_color, sort_order)
-           VALUES (?, ?, ?, ?, ?)""",
-        (module_id, new_image_path, slide["caption"], slide["background_color"], max_order + 1),
+        """INSERT INTO training_slides
+           (module_id, image_path, caption, background_color, sort_order,
+            media_data, media_mimetype, media_kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            module_id,
+            new_image_path,
+            slide["caption"],
+            slide["background_color"],
+            max_order + 1,
+            slide["media_data"],
+            slide["media_mimetype"],
+            slide["media_kind"],
+        ),
     )
     new_slide_id = cur.lastrowid
 
@@ -1684,7 +1716,8 @@ def duplicate_training_slide(slide_id):
     ).fetchall()
     for el in elements:
         content = el["content"]
-        if el["element_type"] == "image" and content:
+        if el["element_type"] in ("image", "video") and content and not el["media_data"]:
+            # Legacy file-based element (no BLOB yet) — copy the file if it still exists.
             src = os.path.join(TRAINING_SLIDES_FOLDER, content)
             ext = content.rsplit(".", 1)[-1]
             new_name = f"{secrets.token_hex(8)}.{ext}"
@@ -1696,8 +1729,8 @@ def duplicate_training_slide(slide_id):
         db.execute(
             """INSERT INTO slide_elements
                (slide_id, element_type, content, pos_x, pos_y, width, height, z_index,
-                font_size, color, bold, align)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                font_size, color, bold, align, media_data, media_mimetype)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 new_slide_id,
                 el["element_type"],
@@ -1711,6 +1744,8 @@ def duplicate_training_slide(slide_id):
                 el["color"],
                 el["bold"],
                 el["align"],
+                el["media_data"],
+                el["media_mimetype"],
             ),
         )
 
@@ -1804,8 +1839,8 @@ def add_text_element(slide_id):
     return {"ok": True, "element": dict(element)}
 
 
-@app.route("/admin/training/slides/<int:slide_id>/elements/image", methods=["POST"])
-def add_image_element(slide_id):
+@app.route("/admin/training/slides/<int:slide_id>/elements/media", methods=["POST"])
+def add_media_element(slide_id):
     resp = require_permission("manage_training")
     if resp:
         return resp
@@ -1816,12 +1851,15 @@ def add_image_element(slide_id):
         return {"error": "not found"}, 404
 
     file = request.files.get("image_file")
-    if not file or not file.filename or not allowed_image(file.filename):
-        return {"error": "invalid image"}, 400
+    if not file or not file.filename or not allowed_media(file.filename):
+        return {"error": "invalid file — allowed: PNG, JPG, GIF, WEBP, MP4, WEBM, OGG, MOV"}, 400
 
-    ext = file.filename.rsplit(".", 1)[1].lower()
-    stored_name = f"{secrets.token_hex(8)}.{ext}"
-    file.save(os.path.join(TRAINING_SLIDES_FOLDER, stored_name))
+    data = file.read()
+    if not data or len(data) > MAX_MEDIA_BYTES:
+        return {"error": "file too large (50 MB max)"}, 400
+
+    mimetype = file.mimetype or guess_mimetype(file.filename)
+    kind = media_kind_for(file.filename)
 
     max_z = db.execute(
         "SELECT COALESCE(MAX(z_index), 0) FROM slide_elements WHERE slide_id = ?", (slide_id,)
@@ -1829,9 +1867,10 @@ def add_image_element(slide_id):
 
     cur = db.execute(
         """INSERT INTO slide_elements
-           (slide_id, element_type, content, pos_x, pos_y, width, height, z_index)
-           VALUES (?, 'image', ?, 10, 10, 50, 50, ?)""",
-        (slide_id, stored_name, max_z + 1),
+           (slide_id, element_type, content, pos_x, pos_y, width, height, z_index,
+            media_data, media_mimetype)
+           VALUES (?, ?, NULL, 10, 10, 50, 50, ?, ?, ?)""",
+        (slide_id, kind, max_z + 1, data, mimetype),
     )
     db.commit()
 
@@ -1839,7 +1878,8 @@ def add_image_element(slide_id):
         "SELECT * FROM slide_elements WHERE id = ?", (cur.lastrowid,)
     ).fetchone()
     result = dict(element)
-    result["image_url"] = url_for("training_slide_file", filename=stored_name)
+    result.pop("media_data", None)
+    result["media_url"] = url_for("slide_element_media", element_id=element["id"])
     return {"ok": True, "element": result}
 
 
@@ -1951,6 +1991,49 @@ def training_slide_file(filename):
     if resp:
         return resp
     return send_from_directory(TRAINING_SLIDES_FOLDER, filename)
+
+
+@app.route("/uploads/training-slide-media/<int:slide_id>")
+def training_slide_media(slide_id):
+    """Serves a slide's image/video straight from the database — works no matter
+    where the app is deployed, since it doesn't depend on the local filesystem."""
+    resp = require_login()
+    if resp:
+        return resp
+
+    db = get_db()
+    slide = db.execute(
+        "SELECT media_data, media_mimetype FROM training_slides WHERE id = ?", (slide_id,)
+    ).fetchone()
+    if slide is None or slide["media_data"] is None:
+        flash("File not found.", "error")
+        return redirect(url_for("employee_dashboard"))
+
+    return send_file(
+        io.BytesIO(slide["media_data"]),
+        mimetype=slide["media_mimetype"] or "application/octet-stream",
+    )
+
+
+@app.route("/uploads/slide-element-media/<int:element_id>")
+def slide_element_media(element_id):
+    """Serves a canvas element's image/video straight from the database."""
+    resp = require_login()
+    if resp:
+        return resp
+
+    db = get_db()
+    element = db.execute(
+        "SELECT media_data, media_mimetype FROM slide_elements WHERE id = ?", (element_id,)
+    ).fetchone()
+    if element is None or element["media_data"] is None:
+        flash("File not found.", "error")
+        return redirect(url_for("employee_dashboard"))
+
+    return send_file(
+        io.BytesIO(element["media_data"]),
+        mimetype=element["media_mimetype"] or "application/octet-stream",
+    )
 
 
 @app.route("/admin/training/<int:module_id>/assign", methods=["POST"])

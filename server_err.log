@@ -1,3 +1,11 @@
 WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
  * Running on http://127.0.0.1:5001
 Press CTRL+C to quit
+127.0.0.1 - - [18/Jul/2026 16:45:53] "GET /login HTTP/1.1" 200 -
+127.0.0.1 - - [18/Jul/2026 16:46:03] "POST /login HTTP/1.1" 302 -
+127.0.0.1 - - [18/Jul/2026 16:46:03] "POST /admin/training/slides/33/elements/media HTTP/1.1" 200 -
+127.0.0.1 - - [18/Jul/2026 16:46:13] "GET /uploads/slide-element-media/10 HTTP/1.1" 200 -
+127.0.0.1 - - [18/Jul/2026 16:46:13] "POST /admin/training/slides/33/elements/media HTTP/1.1" 200 -
+127.0.0.1 - - [18/Jul/2026 16:46:21] "GET /admin/training/slides/33/edit HTTP/1.1" 200 -
+127.0.0.1 - - [18/Jul/2026 16:46:22] "GET /admin/training/19/preview HTTP/1.1" 200 -
+127.0.0.1 - - [18/Jul/2026 16:46:52] "POST /admin/training/19/delete HTTP/1.1" 302 -

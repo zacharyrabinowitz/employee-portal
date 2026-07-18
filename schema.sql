@@ -99,6 +99,9 @@ CREATE TABLE training_slides (
     caption TEXT,
     background_color TEXT NOT NULL DEFAULT '#ffffff',
     sort_order INTEGER NOT NULL DEFAULT 0,
+    media_data BLOB,
+    media_mimetype TEXT,
+    media_kind TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -116,6 +119,8 @@ CREATE TABLE slide_elements (
     color TEXT NOT NULL DEFAULT '#1f2430',
     bold INTEGER NOT NULL DEFAULT 0,
     align TEXT NOT NULL DEFAULT 'left',
+    media_data BLOB,
+    media_mimetype TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

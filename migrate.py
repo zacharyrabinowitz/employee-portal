@@ -3,9 +3,12 @@
 Safe to run any number of times. Never drops or recreates tables.
 """
 
+import mimetypes
+import os
 import sqlite3
 
 DB_PATH = "portal.db"
+TRAINING_SLIDES_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "training_slides")
 
 
 def column_exists(conn, table, column):
@@ -154,9 +157,62 @@ def migrate():
             )
         print("Granted Manager all permissions by default (preserves existing access)")
 
+    if not column_exists(conn, "training_slides", "media_data"):
+        conn.execute("ALTER TABLE training_slides ADD COLUMN media_data BLOB")
+        conn.execute("ALTER TABLE training_slides ADD COLUMN media_mimetype TEXT")
+        conn.execute("ALTER TABLE training_slides ADD COLUMN media_kind TEXT")
+        print("Added training_slides media columns (media_data, media_mimetype, media_kind)")
+
+    if not column_exists(conn, "slide_elements", "media_data"):
+        conn.execute("ALTER TABLE slide_elements ADD COLUMN media_data BLOB")
+        conn.execute("ALTER TABLE slide_elements ADD COLUMN media_mimetype TEXT")
+        print("Added slide_elements media columns (media_data, media_mimetype)")
+
+    backfill_slide_media_from_disk(conn)
+
     conn.commit()
     conn.close()
     print("Migration complete. No existing data was touched.")
+
+
+def backfill_slide_media_from_disk(conn):
+    """Images uploaded before BLOB storage existed are just a filename on disk,
+    which doesn't survive on hosts with an ephemeral filesystem. Where the file
+    still happens to exist locally, copy its bytes into the new BLOB columns so
+    it keeps working regardless of where the app is deployed."""
+    slides = conn.execute(
+        "SELECT id, image_path FROM training_slides WHERE media_data IS NULL AND image_path != ''"
+    ).fetchall()
+    for slide_id, image_path in slides:
+        full_path = os.path.join(TRAINING_SLIDES_FOLDER, image_path)
+        if not os.path.isfile(full_path):
+            continue
+        mimetype = mimetypes.guess_type(image_path)[0] or "application/octet-stream"
+        kind = "video" if mimetype.startswith("video/") else "image"
+        with open(full_path, "rb") as f:
+            data = f.read()
+        conn.execute(
+            "UPDATE training_slides SET media_data = ?, media_mimetype = ?, media_kind = ? WHERE id = ?",
+            (data, mimetype, kind, slide_id),
+        )
+        print(f"  Backfilled slide #{slide_id} media from disk ({image_path}, {len(data)} bytes)")
+
+    elements = conn.execute(
+        """SELECT id, content FROM slide_elements
+           WHERE element_type = 'image' AND media_data IS NULL AND content IS NOT NULL"""
+    ).fetchall()
+    for element_id, content in elements:
+        full_path = os.path.join(TRAINING_SLIDES_FOLDER, content)
+        if not os.path.isfile(full_path):
+            continue
+        mimetype = mimetypes.guess_type(content)[0] or "application/octet-stream"
+        with open(full_path, "rb") as f:
+            data = f.read()
+        conn.execute(
+            "UPDATE slide_elements SET media_data = ?, media_mimetype = ? WHERE id = ?",
+            (data, mimetype, element_id),
+        )
+        print(f"  Backfilled slide element #{element_id} media from disk ({content}, {len(data)} bytes)")
 
 
 def backfill_usernames(conn):

@@ -58,13 +58,23 @@
 
   <div class="tab-panel" data-tab="slides">
     <div class="card">
-      <h3>Slideshow Images</h3>
+      <h3>Slideshow Media</h3>
       {% if slides %}
       <div class="slide-thumb-grid">
         {% for slide in slides %}
         <div class="slide-thumb">
-          {% if slide.image_path %}
+          {% if slide.media_kind == 'video' %}
+            <video src="{{ url_for('training_slide_media', slide_id=slide.id) }}" style="width:100%; height:130px; object-fit:cover; display:block; background:#000;" muted></video>
+          {% elif slide.media_kind == 'image' %}
+            <img src="{{ url_for('training_slide_media', slide_id=slide.id) }}" alt="Slide {{ loop.index }}">
+          {% elif slide.image_path %}
             <img src="{{ url_for('training_slide_file', filename=slide.image_path) }}" alt="Slide {{ loop.index }}">
+          {% else %}
+            <div style="height:130px; display:flex; align-items:center; justify-content:center; background-color:{{ slide.background_color }};">
+              <span class="badge badge-muted">{{ slide.elements|length }} element(s)</span>
+            </div>
+          {% endif %}
+          {% if slide.media_kind or slide.image_path %}
             {% if can('manage_training') %}
             <form method="post" action="{{ url_for('update_training_slide_caption', slide_id=slide.id) }}" class="caption-form">
               <textarea name="caption" placeholder="Add a caption for this slide (optional)">{{ slide.caption or '' }}</textarea>
@@ -73,10 +83,6 @@
             {% elif slide.caption %}
               <p class="form-hint" style="padding:0 0.75rem;">{{ slide.caption }}</p>
             {% endif %}
-          {% else %}
-            <div style="height:130px; display:flex; align-items:center; justify-content:center; background-color:{{ slide.background_color }};">
-              <span class="badge badge-muted">{{ slide.elements|length }} element(s)</span>
-            </div>
           {% endif %}
           {% if can('manage_training') %}
           <form method="post" action="{{ url_for('delete_training_slide', slide_id=slide.id) }}" onsubmit="return confirm('Remove this slide?');" style="padding:0 0.75rem 0.75rem;">
@@ -92,15 +98,15 @@
       {% endif %}
 
       {% if can('manage_training') %}
-      <p class="form-hint">Quick add: upload one or more images, with an optional caption below each. For full control over layout — multiple text/image elements per slide, positioning, colors — use the <strong>Advanced Slide Editor</strong> below instead.</p>
+      <p class="form-hint">Quick add: upload one or more images or videos, with an optional caption below each. Images and videos are stored in the database, so they'll always show up no matter where this app is hosted. For full control over layout — multiple text/image/video elements per slide, positioning, colors — use the <strong>Advanced Slide Editor</strong> below instead.</p>
       <form method="post" action="{{ url_for('add_training_slides', module_id=module.id) }}" enctype="multipart/form-data" style="margin-bottom:1rem;">
         <div class="form-group">
-          <label for="slides">Add Images</label>
-          <input type="file" id="slides" name="slides" multiple accept=".png,.jpg,.jpeg,.gif,.webp" onchange="renderSlideCaptionFields(this, 'addSlideCaptions')">
-          <p class="form-hint">You can add a caption for each image now, or edit it later below.</p>
+          <label for="slides">Add Images or Videos</label>
+          <input type="file" id="slides" name="slides" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.ogg,.mov" onchange="renderSlideCaptionFields(this, 'addSlideCaptions')">
+          <p class="form-hint">You can add a caption for each one now, or edit it later below. 50 MB max per file.</p>
         </div>
         <div id="addSlideCaptions"></div>
-        <button type="submit" class="btn btn-secondary btn-small">Upload Slides</button>
+        <button type="submit" class="btn btn-secondary btn-small">Upload</button>
       </form>
 
       <form method="post" action="{{ url_for('add_blank_slide', module_id=module.id) }}">

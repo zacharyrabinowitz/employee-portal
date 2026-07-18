@@ -779,6 +779,13 @@ th {
   display: block;
 }
 
+.canvas-el video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
 .canvas-el-text {
   white-space: pre-wrap;
   overflow-wrap: break-word;

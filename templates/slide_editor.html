@@ -18,11 +18,19 @@
     {% for s in all_slides %}
     <div class="filmstrip-thumb{{ ' active' if s.id == slide.id else '' }}" draggable="true" data-slide-id="{{ s.id }}">
       <div class="filmstrip-thumb-preview" style="background-color:{{ s.background_color }};" onclick="window.location.href='{{ url_for('slide_editor', slide_id=s.id) }}';">
-        {% if s.elements %}
+        {% if s.media_kind == 'video' %}
+          <video src="{{ url_for('training_slide_media', slide_id=s.id) }}" style="width:100%;height:100%;object-fit:cover;" muted></video>
+        {% elif s.media_kind == 'image' %}
+          <img src="{{ url_for('training_slide_media', slide_id=s.id) }}" alt="" draggable="false" style="width:100%;height:100%;object-fit:cover;">
+        {% elif s.elements %}
           {% for el in s.elements %}
-            {% if el.element_type == 'image' %}
+            {% if el.element_type == 'video' %}
               <div class="slide-el" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%;">
-                <img src="{{ url_for('training_slide_file', filename=el.content) }}" alt="" draggable="false">
+                <video src="{{ url_for('slide_element_media', element_id=el.id) }}" style="width:100%;height:100%;object-fit:contain;" muted draggable="false"></video>
+              </div>
+            {% elif el.element_type == 'image' %}
+              <div class="slide-el" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%;">
+                <img src="{{ url_for('slide_element_media', element_id=el.id) if el.media_mimetype else url_for('training_slide_file', filename=el.content) }}" alt="" draggable="false">
               </div>
             {% else %}
               <div class="slide-el slide-el-text" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; font-size:{{ (el.font_size / 4)|round(1) }}px; color:{{ el.color }}; font-weight:{{ 'bold' if el.bold else 'normal' }}; text-align:{{ el.align }};">{{ el.content }}</div>
@@ -54,8 +62,8 @@
     <div class="slide-editor-canvas-wrap">
       <div class="editor-toolbar">
         <button type="button" class="btn btn-secondary btn-small" id="addTextBtn">+ Add Text</button>
-        <button type="button" class="btn btn-secondary btn-small" id="addImageBtn">+ Add Image</button>
-        <input type="file" id="imageFileInput" accept=".png,.jpg,.jpeg,.gif,.webp" style="display:none;">
+        <button type="button" class="btn btn-secondary btn-small" id="addImageBtn">+ Add Image/Video</button>
+        <input type="file" id="imageFileInput" accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.ogg,.mov" style="display:none;">
         <label class="bg-color-label">
           Background
           <input type="color" id="bgColorInput" value="{{ slide.background_color }}">
@@ -63,11 +71,18 @@
       </div>
       <div class="editor-canvas" id="editorCanvas" data-slide-id="{{ slide.id }}" style="background-color:{{ slide.background_color }};">
         {% for el in elements %}
-          {% if el.element_type == 'image' %}
+          {% if el.element_type == 'video' %}
+          <div class="canvas-el" data-element-id="{{ el.id }}" data-type="video"
+               data-pos-x="{{ el.pos_x }}" data-pos-y="{{ el.pos_y }}" data-width="{{ el.width }}" data-height="{{ el.height }}" data-z-index="{{ el.z_index }}"
+               style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }};">
+            <video src="{{ url_for('slide_element_media', element_id=el.id) }}" controls></video>
+            <span class="resize-handle"></span>
+          </div>
+          {% elif el.element_type == 'image' %}
           <div class="canvas-el" data-element-id="{{ el.id }}" data-type="image"
                data-pos-x="{{ el.pos_x }}" data-pos-y="{{ el.pos_y }}" data-width="{{ el.width }}" data-height="{{ el.height }}" data-z-index="{{ el.z_index }}"
                style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }};">
-            <img src="{{ url_for('training_slide_file', filename=el.content) }}" alt="">
+            <img src="{{ url_for('slide_element_media', element_id=el.id) if el.media_mimetype else url_for('training_slide_file', filename=el.content) }}" alt="">
             <span class="resize-handle"></span>
           </div>
           {% else %}

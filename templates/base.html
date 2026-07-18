@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Employee Portal{% endblock %}</title>
+  <title>{% block title %}Team Member Training{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
   {% if session.get('user_id') %}
   <nav class="navbar">
-    <div class="navbar-brand">Employee Portal</div>
+    <div class="navbar-brand">Team Member Training</div>
     <div class="navbar-links">
       {% set role = session.get('role') %}
       {% set path = request.path %}

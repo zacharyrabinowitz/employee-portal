@@ -3,12 +3,27 @@
   <div class="slideshow-viewport">
     {% for slide in slides %}
     <div class="slide{{ ' active' if loop.first else '' }}">
-      {% if slide.elements %}
+      {% if slide.media_kind == 'video' %}
+        <video controls style="max-width:100%; max-height:50vh; border-radius:6px;">
+          <source src="{{ url_for('training_slide_media', slide_id=slide.id) }}" type="{{ slide.media_mimetype }}">
+          Your browser doesn't support embedded video.
+        </video>
+        {% if slide.caption %}<p class="slide-caption">{{ slide.caption }}</p>{% endif %}
+      {% elif slide.media_kind == 'image' %}
+        <img src="{{ url_for('training_slide_media', slide_id=slide.id) }}" alt="Slide {{ loop.index }}">
+        {% if slide.caption %}<p class="slide-caption">{{ slide.caption }}</p>{% endif %}
+      {% elif slide.elements %}
         <div class="slide-canvas" style="background-color: {{ slide.background_color or '#ffffff' }};">
           {% for el in slide.elements %}
-            {% if el.element_type == 'image' %}
+            {% if el.element_type == 'video' %}
               <div class="slide-el" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }};">
-                <img src="{{ url_for('training_slide_file', filename=el.content) }}" alt="">
+                <video controls style="width:100%; height:100%;">
+                  <source src="{{ url_for('slide_element_media', element_id=el.id) }}" type="{{ el.media_mimetype }}">
+                </video>
+              </div>
+            {% elif el.element_type == 'image' %}
+              <div class="slide-el" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }};">
+                <img src="{{ url_for('slide_element_media', element_id=el.id) if el.media_mimetype else url_for('training_slide_file', filename=el.content) }}" alt="">
               </div>
             {% else %}
               <div class="slide-el slide-el-text" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }}; font-size:{{ el.font_size }}px; color:{{ el.color }}; font-weight:{{ 'bold' if el.bold else 'normal' }}; text-align:{{ el.align }};">{{ el.content }}</div>

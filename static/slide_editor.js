@@ -279,17 +279,18 @@
     if (!imageFileInput.files.length) return;
     var formData = new FormData();
     formData.append('image_file', imageFileInput.files[0]);
-    postForm('/admin/training/slides/' + slideId + '/elements/image', formData).then(function (res) {
+    postForm('/admin/training/slides/' + slideId + '/elements/media', formData).then(function (res) {
       imageFileInput.value = '';
       if (!res || !res.ok) {
-        alert('Could not add that image.');
+        alert((res && res.error) ? res.error : 'Could not add that file.');
         return;
       }
       var el = res.element;
+      var isVideo = el.element_type === 'video';
       var div = document.createElement('div');
       div.className = 'canvas-el';
       div.dataset.elementId = el.id;
-      div.dataset.type = 'image';
+      div.dataset.type = isVideo ? 'video' : 'image';
       div.dataset.posX = el.pos_x;
       div.dataset.posY = el.pos_y;
       div.dataset.width = el.width;
@@ -301,12 +302,13 @@
       div.style.height = el.height + '%';
       div.style.zIndex = el.z_index;
 
-      var img = document.createElement('img');
-      img.src = res.element.image_url;
+      var mediaEl = document.createElement(isVideo ? 'video' : 'img');
+      mediaEl.src = res.element.media_url;
+      if (isVideo) mediaEl.controls = true;
       var handle = document.createElement('span');
       handle.className = 'resize-handle';
 
-      div.appendChild(img);
+      div.appendChild(mediaEl);
       div.appendChild(handle);
       canvas.appendChild(div);
       attachElementHandlers(div);
