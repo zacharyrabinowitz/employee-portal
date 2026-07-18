@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Add Employee · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Add Employee</h1>
+    <p class="page-subtitle">Creates the account and a one-time onboarding link.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('admin_dashboard') }}">Back to Dashboard</a>
+</div>
+
+<div class="card" style="max-width:520px;">
+  <form method="post" action="{{ url_for('add_employee') }}">
+    <div class="form-group">
+      <label for="name">Full Name</label>
+      <input type="text" id="name" name="name" required>
+    </div>
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" required>
+    </div>
+    <div class="form-group">
+      <label for="role">Role</label>
+      <select id="role" name="role">
+        <option value="Employee" selected>Employee</option>
+        <option value="Manager">Manager</option>
+        <option value="Admin">Admin</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="job_title">Job Title</label>
+      <input type="text" id="job_title" name="job_title">
+    </div>
+    <div class="form-group">
+      <label for="department">Department</label>
+      <input type="text" id="department" name="department">
+    </div>
+    <div class="form-group">
+      <label for="hire_date">Hire Date</label>
+      <input type="date" id="hire_date" name="hire_date">
+    </div>
+    <div class="form-group">
+      <label for="date_of_birth">Date of Birth</label>
+      <input type="date" id="date_of_birth" name="date_of_birth" required>
+      <p class="form-hint">Their login is generated automatically — username: first + last name (lowercase, no spaces); password: date of birth.</p>
+    </div>
+    <div class="form-group">
+      <label for="onboarding_template_id">Onboarding Checklist</label>
+      <select id="onboarding_template_id" name="onboarding_template_id">
+        <option value="">Standard onboarding only</option>
+        {% for t in templates %}
+          <option value="{{ t.id }}">{{ t.name }}</option>
+        {% endfor %}
+      </select>
+      <p class="form-hint">Adds job-specific items on top of the standard checklist (handbook, onboarding-required training). <a href="{{ url_for('onboarding_templates_list') }}">Manage checklists</a>.</p>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Employee</button>
+  </form>
+</div>
+{% endblock %}

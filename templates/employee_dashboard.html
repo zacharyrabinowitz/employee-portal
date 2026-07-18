@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}My Dashboard · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Welcome, {{ employee.name }}</h1>
+    <p class="page-subtitle">{{ employee.job_title or '' }} {% if employee.department %}· {{ employee.department }}{% endif %}</p>
+  </div>
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>Onboarding Checklist</h3>
+    <div class="progress-label"><span>{{ steps_done }} / {{ steps_total }} steps</span><span>{{ onboarding_pct }}%</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:{{ onboarding_pct }}%;"></div></div>
+    <a class="btn btn-secondary btn-small" style="margin-top:1rem;" href="{{ url_for('employee_checklist') }}">View Checklist</a>
+  </div>
+
+  <div class="card">
+    <h3>Training Progress</h3>
+    <div class="progress-label"><span>{{ assignments|selectattr('completed_at')|list|length }} / {{ assignments|length }} modules</span><span>{{ training_pct }}%</span></div>
+    <div class="progress-track"><div class="progress-fill" style="width:{{ training_pct }}%;"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Documents Needing Signature</h3>
+  {% for doc in pending_docs %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ doc.title }}</strong>
+        <span>Requires your signature</span>
+      </div>
+      <a class="btn btn-primary btn-small" href="{{ url_for('document_sign', document_id=doc.id) }}">Review &amp; Sign</a>
+    </div>
+  {% else %}
+    <p class="empty-state">Nothing to sign right now.</p>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3>Assigned Training</h3>
+  {% for a in assignments %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ a.title }}</strong>
+        <span>
+          {% if a.completed_at %}
+            Completed {{ a.completed_at }}
+          {% else %}
+            {{ a.description }}
+          {% endif %}
+        </span>
+      </div>
+      {% if a.completed_at %}
+        <span class="badge badge-success">Completed</span>
+        <a class="btn btn-secondary btn-small" href="{{ url_for('training_module_view', module_id=a.module_id) }}">View</a>
+      {% else %}
+        <a class="btn btn-primary btn-small" href="{{ url_for('training_module_view', module_id=a.module_id) }}">Start</a>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty-state">No training assigned yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

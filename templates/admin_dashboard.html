@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Employees</h1>
+    <p class="page-subtitle">Onboarding and training status across the team.</p>
+  </div>
+  {% if can('manage_employees') %}
+  <a class="btn btn-primary" href="{{ url_for('add_employee') }}">+ Add Employee</a>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Hire Date</th>
+        <th>Status</th>
+        <th>Onboarding</th>
+        <th>Training</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td><a href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">{{ row.employee.name }}</a></td>
+        <td>{{ row.employee.role }}</td>
+        <td>{{ row.employee.hire_date or '—' }}</td>
+        <td>
+          {% if row.employee.status == 'Active' %}
+            <span class="badge badge-success">Active</span>
+          {% elif row.employee.status == 'Pending' %}
+            <span class="badge badge-warning">Pending</span>
+          {% else %}
+            <span class="badge badge-muted">Inactive</span>
+          {% endif %}
+        </td>
+        <td style="min-width:120px;">
+          <div class="progress-label"><span>{{ row.onboarding_pct }}%</span></div>
+          <div class="progress-track"><div class="progress-fill" style="width:{{ row.onboarding_pct }}%;"></div></div>
+        </td>
+        <td style="min-width:120px;">
+          <div class="progress-label"><span>{{ row.training_pct }}%</span></div>
+          <div class="progress-track"><div class="progress-fill" style="width:{{ row.training_pct }}%;"></div></div>
+        </td>
+        <td><a class="btn btn-secondary btn-small" href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">View</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No employees yet. Add one to get started.</p>
+  {% endif %}
+</div>
+{% endblock %}

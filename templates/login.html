@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Log In · Employee Portal{% endblock %}
+{% block content %}
+<div class="auth-wrapper">
+  <div class="auth-card">
+    <h1>Employee Portal</h1>
+    <p class="auth-subtitle">Sign in to continue</p>
+
+    <form method="post" action="{{ url_for('login') }}">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus autocapitalize="none">
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;">Log In</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

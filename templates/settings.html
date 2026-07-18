@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Settings · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Settings</h1>
+    <p class="page-subtitle">Manage portal-wide configuration.</p>
+  </div>
+</div>
+
+<div class="card-grid">
+  {% if can('manage_onboarding_checklists') %}
+  <div class="card">
+    <h3>Onboarding Checklists</h3>
+    <p class="form-hint">Build custom onboarding checklists for different jobs — bundle documents, training modules, and tasks together, then assign the checklist when you add a new employee.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('onboarding_templates_list') }}">Manage Onboarding Checklists</a>
+  </div>
+  {% endif %}
+
+  {% if can('manage_settings') %}
+  <div class="card">
+    <h3>Signup Page</h3>
+    <p class="form-hint">Customize the heading, message, and button text new employees see when they click their onboarding link to activate their account.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('onboarding_page_settings') }}">Customize Signup Page</a>
+  </div>
+  {% endif %}
+
+  {% if session.get('role') == 'Admin' %}
+  <div class="card">
+    <h3>Role Permissions</h3>
+    <p class="form-hint">Control what the Manager role can see and do across the portal.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('role_permissions_settings') }}">Manage Role Permissions</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

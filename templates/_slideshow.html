@@ -1,0 +1,64 @@
+{% if slides %}
+<div class="slideshow" id="slideshow">
+  <div class="slideshow-viewport">
+    {% for slide in slides %}
+    <div class="slide{{ ' active' if loop.first else '' }}">
+      {% if slide.elements %}
+        <div class="slide-canvas" style="background-color: {{ slide.background_color or '#ffffff' }};">
+          {% for el in slide.elements %}
+            {% if el.element_type == 'image' %}
+              <div class="slide-el" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }};">
+                <img src="{{ url_for('training_slide_file', filename=el.content) }}" alt="">
+              </div>
+            {% else %}
+              <div class="slide-el slide-el-text" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }}; font-size:{{ el.font_size }}px; color:{{ el.color }}; font-weight:{{ 'bold' if el.bold else 'normal' }}; text-align:{{ el.align }};">{{ el.content }}</div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% elif slide.image_path %}
+        <img src="{{ url_for('training_slide_file', filename=slide.image_path) }}" alt="Slide {{ loop.index }}">
+        {% if slide.caption %}<p class="slide-caption">{{ slide.caption }}</p>{% endif %}
+      {% else %}
+        <div class="slide-canvas" style="background-color: {{ slide.background_color or '#ffffff' }};"></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if slides|length > 1 %}
+  <div class="slideshow-controls">
+    <button type="button" class="btn btn-secondary btn-small" onclick="slideshowChange(-1)">&lsaquo; Prev</button>
+    <span class="slideshow-counter"><span id="slideshowCurrent">1</span> / {{ slides|length }}</span>
+    <button type="button" class="btn btn-secondary btn-small" onclick="slideshowChange(1)">Next &rsaquo;</button>
+  </div>
+  <div class="slideshow-dots">
+    {% for slide in slides %}
+      <span class="dot{{ ' active' if loop.first else '' }}" onclick="slideshowGoTo({{ loop.index0 }})"></span>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+<script>
+(function () {
+  var current = 0;
+  var root = document.getElementById('slideshow');
+  var slides = root.querySelectorAll('.slide');
+  var dots = root.querySelectorAll('.dot');
+  var counter = document.getElementById('slideshowCurrent');
+
+  window.slideshowChange = function (delta) {
+    slideshowGoTo(current + delta);
+  };
+
+  window.slideshowGoTo = function (index) {
+    if (index < 0) index = slides.length - 1;
+    if (index >= slides.length) index = 0;
+    slides[current].classList.remove('active');
+    if (dots.length) dots[current].classList.remove('active');
+    current = index;
+    slides[current].classList.add('active');
+    if (dots.length) dots[current].classList.add('active');
+    if (counter) counter.textContent = current + 1;
+  };
+})();
+</script>
+{% endif %}

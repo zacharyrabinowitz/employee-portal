@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}{{ module.title }} · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ module.title }} {% if module.is_onboarding %}<span class="badge badge-success">Standard onboarding</span>{% endif %}</h1>
+    <p class="page-subtitle">{{ module.description }}</p>
+  </div>
+  <div class="btn-row">
+    <a class="btn btn-primary" href="{{ url_for('preview_training_module', module_id=module.id) }}" target="_blank" rel="noopener">Preview as Employee</a>
+    <a class="btn btn-secondary" href="{{ url_for('admin_training') }}">Back to Training</a>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab-buttons">
+    <button type="button" class="tab-btn active" data-tab="overview">Overview</button>
+    <button type="button" class="tab-btn" data-tab="slides">Slideshow</button>
+    <button type="button" class="tab-btn" data-tab="onboarding">Onboarding</button>
+    <button type="button" class="tab-btn" data-tab="assign">Assign &amp; Status</button>
+    {% if can('manage_training') %}
+    <button type="button" class="tab-btn" data-tab="danger">Danger Zone</button>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel active" data-tab="overview">
+    <div class="card">
+      <h3>Preview</h3>
+      {% include "_slideshow.html" %}
+      {% if module.content %}
+      <div class="doc-content">{{ module.content }}</div>
+      {% elif not slides %}
+      <div class="doc-content">No content provided.</div>
+      {% endif %}
+    </div>
+
+    {% if can('manage_training') %}
+    <div class="card" style="max-width:820px;">
+      <h3>Edit Module</h3>
+      <form method="post" action="{{ url_for('edit_training_module', module_id=module.id) }}">
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" name="title" value="{{ module.title }}" required>
+        </div>
+        <div class="form-group">
+          <label for="description">Description</label>
+          <input type="text" id="description" name="description" value="{{ module.description or '' }}" placeholder="Short summary">
+        </div>
+        <div class="form-group">
+          <label for="content">Content</label>
+          <textarea id="content" name="content" class="textarea-large" placeholder="Training text, or a video/reading link...">{{ module.content or '' }}</textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel" data-tab="slides">
+    <div class="card">
+      <h3>Slideshow Images</h3>
+      {% if slides %}
+      <div class="slide-thumb-grid">
+        {% for slide in slides %}
+        <div class="slide-thumb">
+          {% if slide.image_path %}
+            <img src="{{ url_for('training_slide_file', filename=slide.image_path) }}" alt="Slide {{ loop.index }}">
+            {% if can('manage_training') %}
+            <form method="post" action="{{ url_for('update_training_slide_caption', slide_id=slide.id) }}" class="caption-form">
+              <textarea name="caption" placeholder="Add a caption for this slide (optional)">{{ slide.caption or '' }}</textarea>
+              <button type="submit" class="btn btn-secondary btn-small">Save</button>
+            </form>
+            {% elif slide.caption %}
+              <p class="form-hint" style="padding:0 0.75rem;">{{ slide.caption }}</p>
+            {% endif %}
+          {% else %}
+            <div style="height:130px; display:flex; align-items:center; justify-content:center; background-color:{{ slide.background_color }};">
+              <span class="badge badge-muted">{{ slide.elements|length }} element(s)</span>
+            </div>
+          {% endif %}
+          {% if can('manage_training') %}
+          <form method="post" action="{{ url_for('delete_training_slide', slide_id=slide.id) }}" onsubmit="return confirm('Remove this slide?');" style="padding:0 0.75rem 0.75rem;">
+            <a class="btn btn-secondary btn-small" href="{{ url_for('slide_editor', slide_id=slide.id) }}" style="width:100%; margin-bottom:0.4rem;">Edit (Advanced)</a>
+            <button type="submit" class="btn btn-danger btn-small" style="width:100%;">Remove</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+        <p class="empty-state">No slides yet.</p>
+      {% endif %}
+
+      {% if can('manage_training') %}
+      <p class="form-hint">Quick add: upload one or more images, with an optional caption below each. For full control over layout — multiple text/image elements per slide, positioning, colors — use the <strong>Advanced Slide Editor</strong> below instead.</p>
+      <form method="post" action="{{ url_for('add_training_slides', module_id=module.id) }}" enctype="multipart/form-data" style="margin-bottom:1rem;">
+        <div class="form-group">
+          <label for="slides">Add Images</label>
+          <input type="file" id="slides" name="slides" multiple accept=".png,.jpg,.jpeg,.gif,.webp" onchange="renderSlideCaptionFields(this, 'addSlideCaptions')">
+          <p class="form-hint">You can add a caption for each image now, or edit it later below.</p>
+        </div>
+        <div id="addSlideCaptions"></div>
+        <button type="submit" class="btn btn-secondary btn-small">Upload Slides</button>
+      </form>
+
+      <form method="post" action="{{ url_for('add_blank_slide', module_id=module.id) }}">
+        <button type="submit" class="btn btn-primary btn-small">+ Add Blank Slide (Advanced Editor)</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="tab-panel" data-tab="onboarding">
+    {% if can('manage_training') %}
+    <div class="card" style="max-width:520px;">
+      <h3>Standard Onboarding</h3>
+      <p class="form-hint">Assign this module to every employee automatically — current and future hires.</p>
+      <form method="post" action="{{ url_for('toggle_module_onboarding', module_id=module.id) }}">
+        {% if module.is_onboarding %}
+          <button type="submit" class="btn btn-secondary">Remove from Standard Onboarding</button>
+        {% else %}
+          <button type="submit" class="btn btn-secondary">Add to Standard Onboarding (All Employees)</button>
+        {% endif %}
+      </form>
+    </div>
+
+    <div class="card" style="max-width:520px;">
+      <h3>Job-Specific Onboarding Checklists</h3>
+      <p class="form-hint">In addition to (or instead of) Standard Onboarding above, include this module in specific onboarding checklists — useful when it only applies to certain jobs.</p>
+      {% if templates %}
+      <form method="post" action="{{ url_for('update_module_checklists', module_id=module.id) }}">
+        {% for t in templates %}
+          <div class="checkbox-row" style="margin-bottom:0.5rem;">
+            <input type="checkbox" id="tpl_{{ t.id }}" name="template_ids" value="{{ t.id }}" {% if t.id in linked_template_ids %}checked{% endif %}>
+            <label for="tpl_{{ t.id }}" style="font-weight:400;">{{ t.name }}</label>
+          </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-secondary btn-small">Save</button>
+      </form>
+      {% else %}
+        <p class="empty-state">No onboarding checklists yet. <a href="{{ url_for('onboarding_templates_list') }}">Create one in Settings.</a></p>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="empty-state">You don't have permission to manage onboarding settings for this module.</p>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel" data-tab="assign">
+    {% if can('manage_training') %}
+    <div class="card" style="max-width:640px;">
+      <h3>Assign Module</h3>
+      <form method="post" action="{{ url_for('assign_training', module_id=module.id) }}">
+        <div class="checkbox-row form-group">
+          <input type="checkbox" id="assign_all" name="assign_all">
+          <label for="assign_all">Assign to all current employees</label>
+        </div>
+        {% if unassigned %}
+        <div class="form-group">
+          <label>Or select individually</label>
+          {% for emp in unassigned %}
+            <div class="checkbox-row" style="margin-bottom:0.4rem;">
+              <input type="checkbox" id="emp_{{ emp.id }}" name="employee_ids" value="{{ emp.id }}">
+              <label for="emp_{{ emp.id }}" style="font-weight:400;">{{ emp.name }} ({{ emp.email }})</label>
+            </div>
+          {% endfor %}
+        </div>
+        {% else %}
+          <p class="form-hint">All employees are already assigned.</p>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">Assign</button>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <h3>Assignment Status</h3>
+      {% if assignments %}
+      <table>
+        <thead>
+          <tr><th>Employee</th><th>Status</th><th>Assigned</th><th>Completed</th></tr>
+        </thead>
+        <tbody>
+          {% for a in assignments %}
+          <tr>
+            <td>{{ a.employee_name }}</td>
+            <td>
+              {% if a.completed_at %}
+                <span class="badge badge-success">Completed</span>
+              {% else %}
+                <span class="badge badge-warning">Assigned</span>
+              {% endif %}
+            </td>
+            <td>{{ a.assigned_at }}</td>
+            <td>{{ a.completed_at or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty-state">Not assigned to anyone yet.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if can('manage_training') %}
+  <div class="tab-panel" data-tab="danger">
+    <div class="card confirm-box">
+      <p>Deleting this module removes all assignments and checklist steps tied to it.</p>
+      <form method="post" action="{{ url_for('delete_training', module_id=module.id) }}">
+        <div class="form-group">
+          <label for="confirm">Type "delete" to confirm</label>
+          <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+        </div>
+        <button type="submit" class="btn btn-danger">Delete Module</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}{{ employee.name }} · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ employee.name }}</h1>
+    <p class="page-subtitle">{{ employee.job_title or 'No title set' }} · {{ employee.department or 'No department' }}</p>
+  </div>
+  <div class="btn-row">
+    <a class="btn btn-secondary" href="{{ url_for('admin_dashboard') }}">Back</a>
+    {% if can('manage_employees') %}
+      <a class="btn btn-secondary" href="{{ url_for('edit_employee', employee_id=employee.id) }}">Edit</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if onboarding_link %}
+<div class="card" style="border-color:#c9d8ff;background:#f5f8ff;">
+  <h3>Onboarding Link (not yet used)</h3>
+  <p class="form-hint">Share this one-time link with {{ employee.name }} so they can set a password and log in.</p>
+  <input type="text" readonly value="{{ onboarding_link }}" onclick="this.select();">
+</div>
+{% endif %}
+
+<div class="tabs">
+  <div class="tab-buttons">
+    <button type="button" class="tab-btn active" data-tab="overview">Overview</button>
+    <button type="button" class="tab-btn" data-tab="documents">Documents &amp; Uploads</button>
+    <button type="button" class="tab-btn" data-tab="notes">Notes</button>
+    {% if session.get('role') == 'Admin' %}
+    <button type="button" class="tab-btn" data-tab="danger">Danger Zone</button>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel active" data-tab="overview">
+    <div class="card-grid">
+      <div class="card">
+        <h3>Personal Info</h3>
+        <p><strong>Username:</strong> {{ employee.username or '—' }}</p>
+        <p><strong>Email:</strong> {{ employee.email }}</p>
+        <p><strong>Role:</strong> {{ employee.role }}</p>
+        <p><strong>Status:</strong> {{ employee.status }}</p>
+        <p><strong>Hire Date:</strong> {{ employee.hire_date or '—' }}</p>
+        <p><strong>Date of Birth:</strong> {{ employee.date_of_birth or '— (not yet activated)' }}</p>
+        <p><strong>Phone:</strong> {{ employee.phone or '—' }}</p>
+        <p><strong>Emergency Contact:</strong> {{ employee.emergency_contact_name or '—' }} ({{ employee.emergency_contact_phone or '—' }})</p>
+        <p><strong>Onboarding Checklist:</strong>
+          {% if onboarding_template %}
+            <a href="{{ url_for('onboarding_template_detail', template_id=onboarding_template.id) }}">{{ onboarding_template.name }}</a>
+          {% else %}
+            Standard onboarding only
+          {% endif %}
+        </p>
+      </div>
+
+      <div class="card">
+        <h3>Onboarding Progress</h3>
+        <div class="progress-label"><span>{{ onboarding_pct }}% complete</span></div>
+        <div class="progress-track"><div class="progress-fill" style="width:{{ onboarding_pct }}%;"></div></div>
+        <ul style="padding-left:1.1rem; margin-top:1rem;">
+          {% for step in steps %}
+          <li>
+            {% if step.completed_at %}
+              <span class="badge badge-success">Done</span>
+            {% else %}
+              <span class="badge badge-muted">Pending</span>
+            {% endif %}
+            {{ step.step_name }}
+          </li>
+          {% else %}
+          <li class="empty-state">No onboarding steps.</li>
+          {% endfor %}
+        </ul>
+
+        {% if can('manage_employees') %}
+        <form method="post" action="{{ url_for('request_employee_upload', employee_id=employee.id) }}" style="margin-top:1.1rem; border-top:1px solid var(--border); padding-top:1rem;">
+          <div class="form-group">
+            <label for="label">Request a document upload</label>
+            <input type="text" id="label" name="label" placeholder="e.g. Upload a Signed W-4 Form" required>
+            <p class="form-hint">Adds a checklist step asking the employee to upload this specific document.</p>
+          </div>
+          <button type="submit" class="btn btn-secondary btn-small">Add to Checklist</button>
+        </form>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h3>Training Completion</h3>
+        <div class="progress-label"><span>{{ training_pct }}% complete</span></div>
+        <div class="progress-track"><div class="progress-fill" style="width:{{ training_pct }}%;"></div></div>
+        <ul style="padding-left:1.1rem; margin-top:1rem;">
+          {% for a in assignments %}
+          <li>
+            {% if a.completed_at %}
+              <span class="badge badge-success">Completed {{ a.completed_at }}</span>
+            {% else %}
+              <span class="badge badge-warning">In progress</span>
+            {% endif %}
+            {{ a.title }}
+          </li>
+          {% else %}
+          <li class="empty-state">No training assigned.</li>
+          {% endfor %}
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-panel" data-tab="documents">
+    <div class="card-grid">
+      <div class="card">
+        <h3>Documents on File</h3>
+        {% for sig in signatures %}
+          <div class="list-item">
+            <div class="list-item-info">
+              <strong>{{ sig.document_title }}</strong>
+              <span>Signed by "{{ sig.signature_text }}" on {{ sig.signed_at }}</span>
+            </div>
+          </div>
+        {% else %}
+          <p class="empty-state">No signed documents yet.</p>
+        {% endfor %}
+      </div>
+
+      <div class="card">
+        <h3>Uploaded by Employee</h3>
+        {% for upload in uploads %}
+          <div class="list-item">
+            <div class="list-item-info">
+              <strong>{{ upload.label }}</strong>
+              <span>Uploaded {{ upload.uploaded_at }}</span>
+            </div>
+            <div class="btn-row">
+              <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=upload.id) }}" target="_blank" rel="noopener">View</a>
+              {% if session.get('role') == 'Admin' or session.get('role') == 'Manager' %}
+              <form method="post" action="{{ url_for('delete_employee_upload', upload_id=upload.id) }}" onsubmit="return confirm('Remove this file?');">
+                <button type="submit" class="btn btn-danger btn-small">Remove</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        {% else %}
+          <p class="empty-state">No documents uploaded by this employee yet.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-panel" data-tab="notes">
+    <div class="card">
+      <h3>Notes / Activity</h3>
+      {% if can('manage_employees') %}
+      <form method="post" action="{{ url_for('add_note', employee_id=employee.id) }}" style="margin-bottom:1.25rem;">
+        <div class="form-group">
+          <textarea name="body" placeholder="Add a note about this employee..." required></textarea>
+        </div>
+        <button type="submit" class="btn btn-secondary btn-small">Add Note</button>
+      </form>
+      {% endif %}
+      {% for note in notes %}
+        <div class="list-item" style="flex-direction:column; align-items:stretch;">
+          <div class="list-item-info">
+            <span>{{ note.author_name }} · {{ note.created_at }}{% if note.updated_at %} (edited {{ note.updated_at }}){% endif %}</span>
+            <strong style="font-weight:400; display:block; margin-top:0.25rem;">{{ note.body }}</strong>
+          </div>
+          {% if can('manage_employees') %}
+          <div class="btn-row" style="margin-top:0.75rem;">
+            <details>
+              <summary class="btn btn-secondary btn-small">Edit</summary>
+              <form method="post" action="{{ url_for('edit_note', employee_id=employee.id, note_id=note.id) }}" style="margin-top:0.75rem;">
+                <div class="form-group">
+                  <textarea name="body" required>{{ note.body }}</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary btn-small">Save</button>
+              </form>
+            </details>
+            <form method="post" action="{{ url_for('delete_note', employee_id=employee.id, note_id=note.id) }}" onsubmit="return confirm('Delete this note?');">
+              <button type="submit" class="btn btn-danger btn-small">Delete</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      {% else %}
+        <p class="empty-state">No notes yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if session.get('role') == 'Admin' %}
+  <div class="tab-panel" data-tab="danger">
+    <div class="card confirm-box">
+      <p>Danger zone: deleting this employee removes their records permanently.</p>
+      <form method="post" action="{{ url_for('delete_employee', employee_id=employee.id) }}">
+        <div class="form-group">
+          <label for="confirm">Type "delete" to confirm</label>
+          <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+        </div>
+        <button type="submit" class="btn btn-danger">Delete Employee</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

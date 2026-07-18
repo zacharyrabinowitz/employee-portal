@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}New Onboarding Checklist · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>New Onboarding Checklist</h1>
+    <p class="page-subtitle">You'll add documents, training, and tasks to it next.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('onboarding_templates_list') }}">Back to Checklists</a>
+</div>
+
+<div class="card" style="max-width:520px;">
+  <form method="post" action="{{ url_for('add_onboarding_template') }}">
+    <div class="form-group">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" placeholder="e.g. Kitchen Staff Onboarding" required autofocus>
+    </div>
+    <div class="form-group">
+      <label for="description">Description</label>
+      <input type="text" id="description" name="description" placeholder="Optional — what job this checklist is for">
+    </div>
+    <button type="submit" class="btn btn-primary">Create Checklist</button>
+  </form>
+</div>
+{% endblock %}

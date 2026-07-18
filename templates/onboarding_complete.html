@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Welcome · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>You're All Set, {{ employee.name }}!</h1>
+    <p class="page-subtitle">Your account is now active.</p>
+  </div>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <h3>Your Login</h3>
+  <p class="form-hint">Your username and password were generated automatically. Please remember them — you'll need them to log in from now on.</p>
+
+  <p class="form-hint" style="margin-bottom:0.3rem;">Username</p>
+  <div style="text-align:center; font-size:1.4rem; font-family:monospace; letter-spacing:0.05em; background:var(--bg); border:1px solid var(--border); padding:1rem; border-radius:8px; margin-bottom:1rem;">{{ employee.username }}</div>
+
+  <p class="form-hint" style="margin-bottom:0.3rem;">Password (your date of birth)</p>
+  <div style="text-align:center; font-size:1.4rem; font-family:monospace; letter-spacing:0.05em; background:var(--bg); border:1px solid var(--border); padding:1rem; border-radius:8px; margin-bottom:1rem;">{{ password }}</div>
+
+  <a class="btn btn-primary" style="width:100%; text-align:center;" href="{{ url_for('employee_dashboard') }}">Continue to My Dashboard</a>
+</div>
+{% endblock %}

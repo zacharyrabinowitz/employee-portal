@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Onboarding Checklists · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Onboarding Checklists</h1>
+    <p class="page-subtitle">Custom checklists for different jobs — pick one when adding a new employee.</p>
+  </div>
+  <div class="btn-row">
+    {% if can('manage_onboarding_checklists') %}
+    <a class="btn btn-primary" href="{{ url_for('add_onboarding_template') }}">+ New Checklist</a>
+    {% endif %}
+    <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+  </div>
+</div>
+
+<div class="card">
+  {% for row in template_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ row.template.name }}</strong>
+        <span>{{ row.item_count }} item(s) · {{ row.employee_count }} employee(s) using this checklist</span>
+      </div>
+      <a class="btn btn-secondary btn-small" href="{{ url_for('onboarding_template_detail', template_id=row.template.id) }}">Manage</a>
+    </div>
+  {% else %}
+    <p class="empty-state">No onboarding checklists yet. Standard onboarding items (handbook, onboarding-required training) still apply to everyone regardless.</p>
+  {% endfor %}
+</div>
+{% endblock %}

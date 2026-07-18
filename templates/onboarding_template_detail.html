@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ template.name }} · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ template.name }}</h1>
+    <p class="page-subtitle">{{ template.description or 'No description.' }}</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('onboarding_templates_list') }}">Back to Checklists</a>
+</div>
+
+<div class="card">
+  <h3>Checklist Items</h3>
+  {% for item in items %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ item.step_name }}</strong>
+        <span class="badge badge-muted">{{ item.step_type }}</span>
+      </div>
+      {% if can('manage_onboarding_checklists') %}
+      <form method="post" action="{{ url_for('delete_template_item', item_id=item.id) }}" onsubmit="return confirm('Remove this item from the checklist?');">
+        <button type="submit" class="btn btn-danger btn-small">Remove</button>
+      </form>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty-state">No items yet. Add a document, training module, or task below.</p>
+  {% endfor %}
+</div>
+
+{% if can('manage_onboarding_checklists') %}
+<div class="card-grid">
+  <div class="card">
+    <h3>Add a Task</h3>
+    <form method="post" action="{{ url_for('add_template_task_item', template_id=template.id) }}">
+      <div class="form-group">
+        <label for="step_name">What should the employee do?</label>
+        <input type="text" id="step_name" name="step_name" placeholder="e.g. Complete kitchen safety walkthrough" required>
+      </div>
+      <button type="submit" class="btn btn-secondary btn-small">Add Task</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Add a Document</h3>
+    {% if documents %}
+    <form method="post" action="{{ url_for('add_template_document_item', template_id=template.id) }}">
+      <div class="form-group">
+        <label for="document_id">Document</label>
+        <select id="document_id" name="document_id" required>
+          {% for doc in documents %}
+            <option value="{{ doc.id }}">{{ doc.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary btn-small">Add Document</button>
+    </form>
+    {% else %}
+      <p class="empty-state">No documents exist yet. <a href="{{ url_for('admin_documents') }}">Create one first.</a></p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3>Add a Training Module</h3>
+    {% if modules %}
+    <form method="post" action="{{ url_for('add_template_training_item', template_id=template.id) }}">
+      <div class="form-group">
+        <label for="module_id">Training Module</label>
+        <select id="module_id" name="module_id" required>
+          {% for mod in modules %}
+            <option value="{{ mod.id }}">{{ mod.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary btn-small">Add Training Module</button>
+    </form>
+    {% else %}
+      <p class="empty-state">No training modules exist yet. <a href="{{ url_for('add_training_module') }}">Create one first.</a></p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Employees Using This Checklist</h3>
+  {% for emp in employees_using %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ emp.name }}</strong>
+        <span>{{ emp.email }}</span>
+      </div>
+      <a class="btn btn-secondary btn-small" href="{{ url_for('employee_profile_admin', employee_id=emp.id) }}">View</a>
+    </div>
+  {% else %}
+    <p class="empty-state">No employees are currently assigned this checklist. Select it when adding a new employee.</p>
+  {% endfor %}
+</div>
+
+{% if can('manage_onboarding_checklists') %}
+<div class="card confirm-box">
+  <p>Deleting this checklist does not remove onboarding steps already given to employees — it only stops new employees from being assigned it.</p>
+  <form method="post" action="{{ url_for('delete_onboarding_template', template_id=template.id) }}">
+    <div class="form-group">
+      <label for="confirm">Type "delete" to confirm</label>
+      <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+    </div>
+    <button type="submit" class="btn btn-danger">Delete Checklist</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

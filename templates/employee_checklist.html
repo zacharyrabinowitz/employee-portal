@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Onboarding Checklist · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Onboarding Checklist</h1>
+    <p class="page-subtitle">{{ steps_done }} of {{ steps_total }} steps complete.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="progress-label"><span>Overall progress</span><span>{{ onboarding_pct }}%</span></div>
+  <div class="progress-track"><div class="progress-fill" style="width:{{ onboarding_pct }}%;"></div></div>
+</div>
+
+<div class="card">
+  {% for step in steps %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ step.step_name }}</strong>
+        <span>
+          {% if step.completed_at %}
+            Completed {{ step.completed_at }}
+          {% else %}
+            Not yet completed
+          {% endif %}
+        </span>
+      </div>
+      {% if step.completed_at %}
+        <span class="badge badge-success">Done</span>
+        {% if step.step_type == 'upload' and step_uploads.get(step.id) %}
+          <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=step_uploads[step.id].id) }}" target="_blank" rel="noopener">View</a>
+        {% elif step.step_type == 'document' %}
+          <a class="btn btn-secondary btn-small" href="{{ url_for('document_sign', document_id=step.related_id) }}">View</a>
+        {% elif step.step_type == 'training' %}
+          <a class="btn btn-secondary btn-small" href="{{ url_for('training_module_view', module_id=step.related_id) }}">View</a>
+        {% endif %}
+      {% elif step.step_type == 'document' %}
+        <a class="btn btn-primary btn-small" href="{{ url_for('document_sign', document_id=step.related_id) }}">Sign Document</a>
+      {% elif step.step_type == 'training' %}
+        <a class="btn btn-primary btn-small" href="{{ url_for('training_module_view', module_id=step.related_id) }}">Complete Training</a>
+      {% elif step.step_type == 'upload' %}
+        <form method="post" action="{{ url_for('fulfill_upload_step', step_id=step.id) }}" enctype="multipart/form-data" class="btn-row" style="align-items:center;">
+          <input type="file" name="upload_file" required accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" style="max-width:220px;">
+          <button type="submit" class="btn btn-primary btn-small">Upload</button>
+        </form>
+      {% else %}
+        <form method="post" action="{{ url_for('complete_task_step', step_id=step.id) }}">
+          <button type="submit" class="btn btn-primary btn-small">Mark Complete</button>
+        </form>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty-state">No onboarding steps assigned.</p>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3>My Documents</h3>
+  <p class="form-hint">Upload documents your employer has asked for — ID, signed forms, certifications, etc.</p>
+  <form method="post" action="{{ url_for('upload_employee_document') }}" enctype="multipart/form-data" style="margin-bottom:1.25rem;">
+    <div class="form-group">
+      <label for="label">What is this document?</label>
+      <input type="text" id="label" name="label" placeholder="e.g. Signed I-9 Form" required>
+    </div>
+    <div class="form-group">
+      <label for="upload_file">File</label>
+      <input type="file" id="upload_file" name="upload_file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" required>
+      <p class="form-hint">PDF, Word, text, or image — up to 10 MB.</p>
+    </div>
+    <button type="submit" class="btn btn-primary btn-small">Upload</button>
+  </form>
+
+  {% for upload in uploads %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ upload.label }}</strong>
+        <span>Uploaded {{ upload.uploaded_at }}</span>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=upload.id) }}" target="_blank" rel="noopener">View</a>
+        <form method="post" action="{{ url_for('delete_employee_upload', upload_id=upload.id) }}" onsubmit="return confirm('Remove this file?');">
+          <button type="submit" class="btn btn-danger btn-small">Remove</button>
+        </form>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No documents uploaded yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

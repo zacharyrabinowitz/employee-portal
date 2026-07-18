@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Signup Page · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Customize the Signup Page</h1>
+    <p class="page-subtitle">This is what new employees see when they click their onboarding link.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <form method="post" action="{{ url_for('onboarding_page_settings') }}">
+    <div class="form-group">
+      <label for="heading">Heading</label>
+      <input type="text" id="heading" name="heading" value="{{ heading }}">
+      <p class="form-hint">Use <code>{name}</code> anywhere you want the employee's name inserted.</p>
+    </div>
+    <div class="form-group">
+      <label for="message">Welcome Message</label>
+      <textarea id="message" name="message" class="textarea-large">{{ message }}</textarea>
+    </div>
+    <div class="form-group">
+      <label for="button_text">Button Text</label>
+      <input type="text" id="button_text" name="button_text" value="{{ button_text }}">
+    </div>
+    <button type="submit" class="btn btn-primary">Save</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>Preview</h3>
+  <p class="form-hint">The page always ends with a single activation button — the employee's username (from their name) and password (their date of birth) were already generated when you added them, so there's nothing for them to type. Both are shown to them once, right after they activate.</p>
+  <div class="doc-content">
+    <strong style="font-size:1.2rem; display:block; margin-bottom:0.5rem;">{{ heading.replace('{name}', 'Jane Smith') }}</strong>
+    <p style="margin:0;">{{ message }}</p>
+  </div>
+</div>
+{% endblock %}

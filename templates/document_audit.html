@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ document.title }} · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ document.title }}</h1>
+    <p class="page-subtitle">Signature audit trail</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('admin_documents') }}">Back to Documents</a>
+</div>
+
+<div class="card">
+  <h3>Document</h3>
+  {% if document.file_path %}
+    {% set file_url = url_for('document_file', filename=document.file_path) %}
+    {% set ext = document.file_path.rsplit('.', 1)[-1].lower() %}
+    {% if ext == 'pdf' %}
+      <iframe src="{{ file_url }}" style="width:100%; height:60vh; border:1px solid var(--border); border-radius:8px;"></iframe>
+    {% elif ext in ['png', 'jpg', 'jpeg'] %}
+      <img src="{{ file_url }}" alt="{{ document.title }}" style="max-width:100%; border-radius:8px; border:1px solid var(--border);">
+    {% else %}
+      <p><a class="btn btn-secondary" href="{{ file_url }}" target="_blank" rel="noopener">Download {{ document.title }}</a></p>
+    {% endif %}
+    <p><a href="{{ file_url }}" target="_blank" rel="noopener">Open in a new tab</a></p>
+  {% endif %}
+  {% if document.content %}
+    <div class="doc-content">{{ document.content }}</div>
+  {% elif not document.file_path %}
+    <div class="doc-content">No content provided.</div>
+  {% endif %}
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>Signed ({{ signed|length }})</h3>
+    {% for sig in signed %}
+      <div class="list-item">
+        <div class="list-item-info">
+          <strong>{{ sig.employee_name }}</strong>
+          <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }} from {{ sig.session_marker }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">No one has signed yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>Outstanding ({{ unsigned|length }})</h3>
+    {% for emp in unsigned %}
+      <div class="list-item">
+        <div class="list-item-info">
+          <strong>{{ emp.name }}</strong>
+          <span>{{ emp.email }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">Everyone has signed.</p>
+    {% endfor %}
+  </div>
+</div>
+
+{% if can('manage_documents') %}
+<div class="card confirm-box">
+  <p>Deleting this document removes all associated signatures and checklist steps.</p>
+  <form method="post" action="{{ url_for('delete_document', document_id=document.id) }}">
+    <div class="form-group">
+      <label for="confirm">Type "delete" to confirm</label>
+      <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+    </div>
+    <button type="submit" class="btn btn-danger">Delete Document</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

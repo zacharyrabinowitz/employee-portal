@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Employee Portal{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  {% if session.get('user_id') %}
+  <nav class="navbar">
+    <div class="navbar-brand">Employee Portal</div>
+    <div class="navbar-links">
+      {% set role = session.get('role') %}
+      {% set path = request.path %}
+      {% if role == 'Admin' or role == 'Manager' %}
+        <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if path.startswith('/admin/dashboard') or path == '/' else '' }}">🏠 Dashboard</a>
+        <a href="{{ url_for('admin_documents') }}" class="{{ 'active' if path.startswith('/admin/documents') or path.startswith('/employee/documents') else '' }}">📄 Documents</a>
+        <a href="{{ url_for('admin_training') }}" class="{{ 'active' if path.startswith('/admin/training') else '' }}">🎓 Training</a>
+        <a href="{{ url_for('settings_home') }}" class="{{ 'active' if path.startswith('/admin/settings') else '' }}">⚙️ Settings</a>
+      {% else %}
+        <a href="{{ url_for('employee_dashboard') }}" class="{{ 'active' if path.startswith('/employee/dashboard') or path == '/' else '' }}">🏠 Dashboard</a>
+        <a href="{{ url_for('employee_checklist') }}" class="{{ 'active' if path.startswith('/employee/checklist') else '' }}">✅ Onboarding Checklist</a>
+        <a href="{{ url_for('employee_profile_self') }}" class="{{ 'active' if path.startswith('/employee/profile') else '' }}">👤 My Profile</a>
+      {% endif %}
+    </div>
+    <div class="navbar-user">
+      <span class="user-name">{{ session.get('name') }}</span>
+      <span class="role-badge">{{ session.get('role') }}</span>
+      <a class="logout-link" href="{{ url_for('logout') }}">Log out</a>
+    </div>
+  </nav>
+  {% endif %}
+
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash flash-{{ 'error' if category == 'error' else 'success' }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

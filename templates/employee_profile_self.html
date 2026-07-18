@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}My Profile · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>My Profile</h1>
+  </div>
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>Account Info</h3>
+    <p><strong>Name:</strong> {{ employee.name }}</p>
+    <p><strong>Email:</strong> {{ employee.email }}</p>
+    <p><strong>Job Title:</strong> {{ employee.job_title or '—' }}</p>
+    <p><strong>Department:</strong> {{ employee.department or '—' }}</p>
+    <p><strong>Hire Date:</strong> {{ employee.hire_date or '—' }}</p>
+    <p class="form-hint">Contact an administrator to change your name, email, or job details.</p>
+  </div>
+
+  <div class="card">
+    <h3>Contact Info</h3>
+    <form method="post" action="{{ url_for('employee_profile_self') }}">
+      <div class="form-group">
+        <label for="phone">Phone</label>
+        <input type="tel" id="phone" name="phone" value="{{ employee.phone or '' }}">
+      </div>
+      <div class="form-group">
+        <label for="emergency_contact_name">Emergency Contact Name</label>
+        <input type="text" id="emergency_contact_name" name="emergency_contact_name" value="{{ employee.emergency_contact_name or '' }}">
+      </div>
+      <div class="form-group">
+        <label for="emergency_contact_phone">Emergency Contact Phone</label>
+        <input type="tel" id="emergency_contact_phone" name="emergency_contact_phone" value="{{ employee.emergency_contact_phone or '' }}">
+      </div>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h3>My Signature History</h3>
+  {% for sig in signatures %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ sig.document_title }}</strong>
+        <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }}</span>
+      </div>
+      <a class="btn btn-secondary btn-small" href="{{ url_for('document_sign', document_id=sig.document_id) }}">View</a>
+    </div>
+  {% else %}
+    <p class="empty-state">No signed documents yet.</p>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3>My Training History</h3>
+  {% for a in assignments %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ a.title }}</strong>
+        <span>
+          {% if a.completed_at %}
+            Completed {{ a.completed_at }}
+          {% else %}
+            Assigned {{ a.assigned_at }}
+          {% endif %}
+        </span>
+      </div>
+      {% if a.completed_at %}
+        <span class="badge badge-success">Completed</span>
+        <a class="btn btn-secondary btn-small" href="{{ url_for('training_module_view', module_id=a.module_id) }}">View</a>
+      {% else %}
+        <span class="badge badge-warning">In progress</span>
+        <a class="btn btn-primary btn-small" href="{{ url_for('training_module_view', module_id=a.module_id) }}">Continue</a>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty-state">No training assigned yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

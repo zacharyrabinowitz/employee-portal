@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ module.title }} · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ module.title }}</h1>
+    <p class="page-subtitle">{{ module.description }}</p>
+  </div>
+  {% if preview %}
+    <a class="btn btn-secondary" href="{{ url_for('training_detail_admin', module_id=module.id) }}">Back to Module</a>
+  {% else %}
+    <a class="btn btn-secondary" href="{{ url_for('employee_dashboard') }}">Back to Dashboard</a>
+  {% endif %}
+</div>
+
+{% if preview %}
+<div class="card" style="border-color:#c9d8ff;background:#f5f8ff;">
+  <p style="margin:0;"><strong>Preview mode</strong> — this is exactly what an employee sees. Nothing on this page is tracked or saved.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  {% include "_slideshow.html" %}
+
+  {% if module.content %}
+  <div class="doc-content">{{ module.content }}</div>
+  {% elif not slides %}
+  <div class="doc-content">No content provided.</div>
+  {% endif %}
+
+  {% if preview %}
+    <div class="checkbox-row form-group">
+      <input type="checkbox" id="acknowledge" disabled>
+      <label for="acknowledge">I have completed this training module.</label>
+    </div>
+    <button type="button" class="btn btn-primary" disabled title="Disabled in preview mode">Mark Complete</button>
+  {% elif assignment.completed_at %}
+    <p class="badge badge-success">Completed on {{ assignment.completed_at }}</p>
+  {% else %}
+    <form method="post" action="{{ url_for('training_module_view', module_id=module.id) }}">
+      <div class="checkbox-row form-group">
+        <input type="checkbox" id="acknowledge" name="acknowledge" required>
+        <label for="acknowledge">I have completed this training module.</label>
+      </div>
+      <button type="submit" class="btn btn-primary">Mark Complete</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

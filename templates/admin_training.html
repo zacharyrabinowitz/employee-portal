@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Training · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Training Modules</h1>
+    <p class="page-subtitle">Create modules and assign them to employees.</p>
+  </div>
+  {% if can('manage_training') %}
+  <a class="btn btn-primary" href="{{ url_for('add_training_module') }}">+ New Training Module</a>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>All Modules</h3>
+  {% for row in module_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>
+          {{ row.module.title }}
+          {% if row.slide_count %}<span class="badge badge-muted">{{ row.slide_count }} slide(s)</span>{% endif %}
+          {% if row.module.is_onboarding %}<span class="badge badge-success">Standard onboarding</span>{% endif %}
+        </strong>
+        <span>{{ row.completed_count }} / {{ row.assigned_count }} completed · Created {{ row.module.created_at }}</span>
+      </div>
+      <div class="btn-row">
+        {% if can('manage_training') %}
+        <form method="post" action="{{ url_for('toggle_module_onboarding', module_id=row.module.id) }}">
+          {% if row.module.is_onboarding %}
+            <button type="submit" class="btn btn-secondary btn-small">Remove from Standard Onboarding</button>
+          {% else %}
+            <button type="submit" class="btn btn-secondary btn-small">Add to Standard Onboarding</button>
+          {% endif %}
+        </form>
+        {% endif %}
+        <a class="btn btn-secondary btn-small" href="{{ url_for('preview_training_module', module_id=row.module.id) }}" target="_blank" rel="noopener">Preview as Employee</a>
+        <a class="btn btn-secondary btn-small" href="{{ url_for('training_detail_admin', module_id=row.module.id) }}">View / Assign</a>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No training modules yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

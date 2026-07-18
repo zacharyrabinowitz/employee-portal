@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Role Permissions · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Role Permissions</h1>
+    <p class="page-subtitle">Control what the Manager role can see and do. Admins always have full access; Employees never have admin access — neither is editable.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <form method="post" action="{{ url_for('role_permissions_settings') }}">
+    <table>
+      <thead>
+        <tr>
+          <th>Permission</th>
+          <th style="text-align:center;">Admin</th>
+          <th style="text-align:center;">Manager</th>
+          <th style="text-align:center;">Employee</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for key, label in permissions %}
+        <tr>
+          <td>{{ label }}</td>
+          <td style="text-align:center;"><input type="checkbox" checked disabled></td>
+          <td style="text-align:center;"><input type="checkbox" name="permissions" value="{{ key }}" {% if key in manager_permissions %}checked{% endif %}></td>
+          <td style="text-align:center;"><input type="checkbox" disabled></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="btn btn-primary" style="margin-top:1.25rem;">Save</button>
+  </form>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <p class="form-hint" style="margin:0;">Deleting an employee is always Admin-only, regardless of these settings.</p>
+</div>
+{% endblock %}

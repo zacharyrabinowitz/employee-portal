@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Editing Slide · {{ module.title }} · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ module.title }}</h1>
+    <p class="page-subtitle">Advanced Slide Editor</p>
+  </div>
+  <div class="btn-row">
+    <a class="btn btn-primary" href="{{ url_for('preview_training_module', module_id=module.id) }}" target="_blank" rel="noopener">Preview as Employee</a>
+    <a class="btn btn-secondary" href="{{ url_for('training_detail_admin', module_id=module.id) }}">Back to Module</a>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Slides</h3>
+  <div class="filmstrip" id="filmstrip" data-module-id="{{ module.id }}">
+    {% for s in all_slides %}
+    <div class="filmstrip-thumb{{ ' active' if s.id == slide.id else '' }}" draggable="true" data-slide-id="{{ s.id }}">
+      <div class="filmstrip-thumb-preview" style="background-color:{{ s.background_color }};" onclick="window.location.href='{{ url_for('slide_editor', slide_id=s.id) }}';">
+        {% if s.elements %}
+          {% for el in s.elements %}
+            {% if el.element_type == 'image' %}
+              <div class="slide-el" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%;">
+                <img src="{{ url_for('training_slide_file', filename=el.content) }}" alt="" draggable="false">
+              </div>
+            {% else %}
+              <div class="slide-el slide-el-text" style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; font-size:{{ (el.font_size / 4)|round(1) }}px; color:{{ el.color }}; font-weight:{{ 'bold' if el.bold else 'normal' }}; text-align:{{ el.align }};">{{ el.content }}</div>
+            {% endif %}
+          {% endfor %}
+        {% elif s.image_path %}
+          <img src="{{ url_for('training_slide_file', filename=s.image_path) }}" alt="" draggable="false" style="width:100%;height:100%;object-fit:cover;">
+        {% endif %}
+      </div>
+      <div class="filmstrip-thumb-label">Slide {{ loop.index }}</div>
+      <div class="filmstrip-thumb-actions">
+        <form method="post" action="{{ url_for('duplicate_training_slide', slide_id=s.id) }}">
+          <button type="submit" class="btn btn-secondary btn-small" title="Duplicate slide">Duplicate</button>
+        </form>
+        <form method="post" action="{{ url_for('delete_training_slide', slide_id=s.id) }}" onsubmit="return confirm('Delete this slide?');">
+          <button type="submit" class="btn btn-danger btn-small" title="Delete slide">Delete</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+    <form method="post" action="{{ url_for('add_blank_slide', module_id=module.id) }}" class="filmstrip-add">
+      <button type="submit" class="btn btn-secondary">+ Add Slide</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="slide-editor-layout">
+    <div class="slide-editor-canvas-wrap">
+      <div class="editor-toolbar">
+        <button type="button" class="btn btn-secondary btn-small" id="addTextBtn">+ Add Text</button>
+        <button type="button" class="btn btn-secondary btn-small" id="addImageBtn">+ Add Image</button>
+        <input type="file" id="imageFileInput" accept=".png,.jpg,.jpeg,.gif,.webp" style="display:none;">
+        <label class="bg-color-label">
+          Background
+          <input type="color" id="bgColorInput" value="{{ slide.background_color }}">
+        </label>
+      </div>
+      <div class="editor-canvas" id="editorCanvas" data-slide-id="{{ slide.id }}" style="background-color:{{ slide.background_color }};">
+        {% for el in elements %}
+          {% if el.element_type == 'image' %}
+          <div class="canvas-el" data-element-id="{{ el.id }}" data-type="image"
+               data-pos-x="{{ el.pos_x }}" data-pos-y="{{ el.pos_y }}" data-width="{{ el.width }}" data-height="{{ el.height }}" data-z-index="{{ el.z_index }}"
+               style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }};">
+            <img src="{{ url_for('training_slide_file', filename=el.content) }}" alt="">
+            <span class="resize-handle"></span>
+          </div>
+          {% else %}
+          <div class="canvas-el canvas-el-text" data-element-id="{{ el.id }}" data-type="text"
+               data-pos-x="{{ el.pos_x }}" data-pos-y="{{ el.pos_y }}" data-width="{{ el.width }}" data-height="{{ el.height }}" data-z-index="{{ el.z_index }}"
+               data-font-size="{{ el.font_size }}" data-color="{{ el.color }}" data-bold="{{ el.bold }}" data-align="{{ el.align }}"
+               style="left:{{ el.pos_x }}%; top:{{ el.pos_y }}%; width:{{ el.width }}%; height:{{ el.height }}%; z-index:{{ el.z_index }}; font-size:{{ el.font_size }}px; color:{{ el.color }}; font-weight:{{ 'bold' if el.bold else 'normal' }}; text-align:{{ el.align }};"><span class="el-text-content">{{ el.content }}</span><span class="resize-handle"></span></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <p class="form-hint">Drag an element to move it, drag its bottom-right corner to resize. Click an element to edit its style in the panel.</p>
+    </div>
+
+    <div class="slide-editor-panel">
+      <h3>Properties</h3>
+      <p class="empty-state" id="noSelectionMsg">Click an element on the slide to edit it.</p>
+      <div id="elementProps" style="display:none;">
+        <div class="form-group" id="textContentGroup">
+          <label for="elText">Text</label>
+          <textarea id="elText" class="textarea-caption-inline"></textarea>
+        </div>
+        <div class="form-group" id="fontSizeGroup">
+          <label for="elFontSize">Font size (px)</label>
+          <input type="number" id="elFontSize" min="8" max="120">
+        </div>
+        <div class="form-group" id="colorGroup">
+          <label for="elColor">Text color</label>
+          <input type="color" id="elColor">
+        </div>
+        <div class="form-group" id="boldGroup">
+          <div class="checkbox-row">
+            <input type="checkbox" id="elBold">
+            <label for="elBold" style="font-weight:400;">Bold</label>
+          </div>
+        </div>
+        <div class="form-group" id="alignGroup">
+          <label>Alignment</label>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary btn-small align-btn" data-align="left">Left</button>
+            <button type="button" class="btn btn-secondary btn-small align-btn" data-align="center">Center</button>
+            <button type="button" class="btn btn-secondary btn-small align-btn" data-align="right">Right</button>
+          </div>
+        </div>
+        <div class="btn-row" style="margin-top:1.25rem;">
+          <button type="button" class="btn btn-secondary btn-small" id="bringToFrontBtn">Bring to Front</button>
+          <button type="button" class="btn btn-danger btn-small" id="deleteElementBtn">Delete Element</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='slide_editor.js') }}"></script>
+{% endblock %}

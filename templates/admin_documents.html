@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Documents · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Policy Documents</h1>
+    <p class="page-subtitle">Documents requiring sign-off are automatically added to every employee's checklist.</p>
+  </div>
+</div>
+
+{% if can('manage_documents') %}
+<div class="card" style="max-width:640px;">
+  <h3>New Document</h3>
+  <form method="post" action="{{ url_for('admin_documents') }}" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" required>
+    </div>
+    <div class="form-group">
+      <label for="document_file">Attach a file</label>
+      <input type="file" id="document_file" name="document_file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg">
+      <p class="form-hint">PDF, Word, text, or image — up to 10 MB. Employees will view or download this file.</p>
+    </div>
+    <div class="form-group">
+      <label for="content">Notes (optional)</label>
+      <textarea id="content" name="content" placeholder="Any additional instructions to show alongside the file..."></textarea>
+    </div>
+    <div class="checkbox-row form-group">
+      <input type="checkbox" id="requires_signature" name="requires_signature" checked>
+      <label for="requires_signature">Requires employee signature</label>
+    </div>
+    <button type="submit" class="btn btn-primary">Create Document</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>All Documents</h3>
+  {% for row in doc_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ row.document.title }} {% if row.document.file_path %}<span class="badge badge-muted">File attached</span>{% endif %}</strong>
+        <span>
+          {% if row.document.requires_signature %}Requires signature ·{% endif %}
+          {{ row.signed_count }} signature(s) on file · Created {{ row.document.created_at }}
+        </span>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-secondary btn-small" href="{{ url_for('document_audit', document_id=row.document.id) }}">View / Audit</a>
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No documents yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}
