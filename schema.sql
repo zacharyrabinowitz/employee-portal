@@ -62,6 +62,7 @@ CREATE TABLE documents (
     content TEXT,
     file_path TEXT,
     requires_signature INTEGER NOT NULL DEFAULT 1,
+    requires_upload INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -170,6 +170,10 @@ def migrate():
 
     backfill_slide_media_from_disk(conn)
 
+    if not column_exists(conn, "documents", "requires_upload"):
+        conn.execute("ALTER TABLE documents ADD COLUMN requires_upload INTEGER NOT NULL DEFAULT 0")
+        print("Added documents.requires_upload")
+
     conn.commit()
     conn.close()
     print("Migration complete. No existing data was touched.")

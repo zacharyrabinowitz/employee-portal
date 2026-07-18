@@ -359,6 +359,15 @@ def apply_onboarding_template_items(db, employee_id, template_id):
             if already:
                 continue
 
+        if item["step_type"] == "upload" and item["related_id"]:
+            already = db.execute(
+                """SELECT 1 FROM onboarding_steps
+                   WHERE employee_id = ? AND step_type = 'upload' AND related_id = ?""",
+                (employee_id, item["related_id"]),
+            ).fetchone()
+            if already:
+                continue
+
         if item["step_type"] == "task":
             already = db.execute(
                 """SELECT 1 FROM onboarding_steps
@@ -392,6 +401,16 @@ def seed_onboarding_steps(db, employee_id):
             """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
                VALUES (?, ?, 'document', ?)""",
             (employee_id, f"Sign {doc['title']}", doc["id"]),
+        )
+
+    upload_docs = db.execute(
+        "SELECT id, title FROM documents WHERE requires_upload = 1"
+    ).fetchall()
+    for doc in upload_docs:
+        db.execute(
+            """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+               VALUES (?, ?, 'upload', ?)""",
+            (employee_id, f"Upload {doc['title']}", doc["id"]),
         )
 
     modules = db.execute(
@@ -1167,7 +1186,9 @@ def admin_documents():
 
         title = request.form.get("title", "").strip()
         content = request.form.get("content", "").strip()
-        requires_signature = 1 if request.form.get("requires_signature") == "on" else 0
+        document_type = request.form.get("document_type", "sign")
+        requires_signature = 1 if document_type == "sign" else 0
+        requires_upload = 1 if document_type == "upload" else 0
 
         file = request.files.get("document_file")
         file_path = None
@@ -1182,20 +1203,23 @@ def admin_documents():
 
         if title:
             cur = db.execute(
-                "INSERT INTO documents (title, content, file_path, requires_signature) VALUES (?, ?, ?, ?)",
-                (title, content, file_path, requires_signature),
+                """INSERT INTO documents (title, content, file_path, requires_signature, requires_upload)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (title, content, file_path, requires_signature, requires_upload),
             )
             new_doc_id = cur.lastrowid
 
-            if requires_signature:
+            if requires_signature or requires_upload:
+                step_type = "document" if requires_signature else "upload"
+                verb = "Sign" if requires_signature else "Upload"
                 employees = db.execute(
                     "SELECT id FROM employees WHERE role = 'Employee'"
                 ).fetchall()
                 for emp in employees:
                     db.execute(
                         """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
-                           VALUES (?, ?, 'document', ?)""",
-                        (emp["id"], f"Sign {title}", new_doc_id),
+                           VALUES (?, ?, ?, ?)""",
+                        (emp["id"], f"{verb} {title}", step_type, new_doc_id),
                     )
 
             db.commit()
