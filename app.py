@@ -2697,7 +2697,7 @@ def import_data():
             return render_template("import_data.html")
 
         try:
-            zf = zipfile.ZipFile(file.stream)
+            zf = zipfile.ZipFile(io.BytesIO(file.read()))
         except zipfile.BadZipFile:
             flash("That file isn't a valid backup zip.", "error")
             return render_template("import_data.html")
