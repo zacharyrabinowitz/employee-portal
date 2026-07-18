@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Quizzes · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Quizzes</h1>
+    <p class="page-subtitle">Create quizzes, add questions, and review employee results.</p>
+  </div>
+  {% if can('manage_quizzes') %}
+  <a class="btn btn-primary" href="{{ url_for('create_quiz') }}">+ Create Quiz</a>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>All Quizzes</h3>
+  {% for row in quiz_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>
+          {{ row.quiz.title }}
+          {% if row.quiz.is_onboarding %}<span class="badge badge-muted">Required for everyone</span>{% endif %}
+        </strong>
+        <span>
+          {{ row.question_count }} question(s) · {{ row.attempt_count }} attempt(s) · Passing score {{ row.quiz.passing_score }}%
+        </span>
+      </div>
+      <div class="btn-row">
+        {% if can('manage_quizzes') %}
+        <a class="btn btn-secondary btn-small" href="{{ url_for('quiz_results', quiz_id=row.quiz.id) }}">Results</a>
+        <a class="btn btn-secondary btn-small" href="{{ url_for('quiz_detail_admin', quiz_id=row.quiz.id) }}">Manage</a>
+        {% else %}
+        <a class="btn btn-secondary btn-small" href="{{ url_for('quiz_detail_admin', quiz_id=row.quiz.id) }}">View</a>
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <p class="empty-state">No quizzes yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

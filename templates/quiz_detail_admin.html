@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }} · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ quiz.title }} {% if quiz.is_onboarding %}<span class="badge badge-muted">Required for everyone</span>{% endif %}</h1>
+    <p class="page-subtitle">{{ quiz.description or 'No description.' }}</p>
+  </div>
+  <div class="btn-row">
+    {% if can('manage_quizzes') %}
+    <a class="btn btn-secondary" href="{{ url_for('quiz_results', quiz_id=quiz.id) }}">Results ({{ attempt_count }})</a>
+    {% endif %}
+    <a class="btn btn-secondary" href="{{ url_for('admin_quizzes') }}">Back to Quizzes</a>
+  </div>
+</div>
+
+{% if can('manage_quizzes') %}
+<div class="card" style="max-width:640px;">
+  <h3>Quiz Details</h3>
+  <form method="post" action="{{ url_for('edit_quiz', quiz_id=quiz.id) }}">
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{ quiz.title }}" required>
+    </div>
+    <div class="form-group">
+      <label for="description">Description</label>
+      <textarea id="description" name="description">{{ quiz.description or '' }}</textarea>
+    </div>
+    <div class="form-group">
+      <label for="training_module_id">Related training module</label>
+      <select id="training_module_id" name="training_module_id">
+        <option value="">None</option>
+        {% for mod in training_modules %}
+          <option value="{{ mod.id }}" {% if quiz.training_module_id == mod.id %}selected{% endif %}>{{ mod.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="passing_score">Passing score (%)</label>
+      <input type="number" id="passing_score" name="passing_score" min="0" max="100" value="{{ quiz.passing_score }}" style="max-width:120px;">
+    </div>
+    <button type="submit" class="btn btn-secondary">Save Details</button>
+  </form>
+</div>
+
+<div class="card-grid" style="max-width:900px;">
+  <div class="card">
+    <h3>Assign to Everyone</h3>
+    <p class="form-hint">{% if quiz.is_onboarding %}This quiz is on every employee's checklist, and every new hire will get it automatically.{% else %}Add this quiz to every current employee's checklist, and every new hire going forward.{% endif %}</p>
+    <form method="post" action="{{ url_for('toggle_quiz_onboarding', quiz_id=quiz.id) }}">
+      <button type="submit" class="btn {% if quiz.is_onboarding %}btn-secondary{% else %}btn-primary{% endif %} btn-small">
+        {% if quiz.is_onboarding %}Remove from Required{% else %}Require for Everyone{% endif %}
+      </button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>Assign to One Employee</h3>
+    {% if assignable_employees %}
+    <form method="post" action="{{ url_for('assign_quiz', quiz_id=quiz.id) }}">
+      <div class="form-group">
+        <select name="employee_id" required>
+          <option value="">Choose an employee...</option>
+          {% for emp in assignable_employees %}
+            <option value="{{ emp.id }}">{{ emp.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary btn-small">Add to Checklist</button>
+    </form>
+    {% else %}
+      <p class="empty-state">Everyone already has this quiz.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Questions ({{ question_rows|length }})</h3>
+  {% for row in question_rows %}
+    <div class="list-item" style="flex-direction:column; align-items:stretch;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:0.75rem; flex-wrap:wrap;">
+        <div class="list-item-info">
+          <strong>{{ loop.index }}. {{ row.question.question_text }}</strong>
+          <span class="badge badge-muted">
+            {% if row.question.question_type == 'multi_choice' %}Multiple answers
+            {% elif row.question.question_type == 'text' %}Text answer
+            {% elif row.question.question_type == 'matching' %}Matching
+            {% else %}Single answer{% endif %}
+          </span>
+          <span>
+            {% if row.question.question_type == 'text' %}
+              Correct answer: {{ row.question.text_answer }}
+            {% elif row.question.question_type == 'matching' %}
+              {% for choice in row.choices %}{{ choice.choice_text }} → {{ choice.match_text }}{% if not loop.last %} · {% endif %}{% endfor %}
+            {% else %}
+              {% for choice in row.choices %}{{ choice.choice_text }}{% if choice.is_correct %} ✓{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+            {% endif %}
+          </span>
+        </div>
+        {% if can('manage_quizzes') %}
+        <form method="post" action="{{ url_for('delete_quiz_question', question_id=row.question.id) }}" onsubmit="return confirm('Remove this question?');">
+          <button type="submit" class="btn btn-danger btn-small">Remove</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if can('manage_quizzes') %}
+      <details style="margin-top:0.75rem;">
+        <summary class="btn btn-secondary btn-small" style="display:inline-block;">Edit Question</summary>
+        <form method="post" action="{{ url_for('edit_quiz_question', question_id=row.question.id) }}" class="qform" style="margin-top:0.75rem;">
+          <div class="form-group">
+            <label>Question</label>
+            <input type="text" name="question_text" value="{{ row.question.question_text }}" required>
+          </div>
+          <div class="form-group">
+            <label>Question Type</label>
+            <select name="question_type" class="q-type-select">
+              <option value="single_choice" {% if row.question.question_type == 'single_choice' %}selected{% endif %}>Multiple choice (single answer)</option>
+              <option value="multi_choice" {% if row.question.question_type == 'multi_choice' %}selected{% endif %}>Multiple choice (multiple answers)</option>
+              <option value="text" {% if row.question.question_type == 'text' %}selected{% endif %}>Text answer</option>
+              <option value="matching" {% if row.question.question_type == 'matching' %}selected{% endif %}>Matching</option>
+            </select>
+          </div>
+          <div class="q-choices">
+            {% for choice in row.choices %}
+            <div class="q-choice-row checkbox-row form-group">
+              <input type="radio" name="correct_index" value="{{ loop.index0 }}" class="q-correct-radio" {% if choice.is_correct %}checked{% endif %}>
+              <input type="checkbox" name="correct_indices" value="{{ loop.index0 }}" class="q-correct-checkbox" style="display:none;" {% if choice.is_correct %}checked{% endif %}>
+              <input type="text" name="choice_text" value="{{ choice.choice_text }}" class="q-choice-text" style="flex:1;">
+              <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+            </div>
+            {% else %}
+            <div class="q-choice-row checkbox-row form-group">
+              <input type="radio" name="correct_index" value="0" class="q-correct-radio" checked>
+              <input type="checkbox" name="correct_indices" value="0" class="q-correct-checkbox" style="display:none;">
+              <input type="text" name="choice_text" placeholder="Choice 1" class="q-choice-text" style="flex:1;">
+              <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+            </div>
+            <div class="q-choice-row checkbox-row form-group">
+              <input type="radio" name="correct_index" value="1" class="q-correct-radio">
+              <input type="checkbox" name="correct_indices" value="1" class="q-correct-checkbox" style="display:none;">
+              <input type="text" name="choice_text" placeholder="Choice 2" class="q-choice-text" style="flex:1;">
+              <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+            </div>
+            {% endfor %}
+            <button type="button" class="btn btn-secondary btn-small q-add-choice">+ Add Choice</button>
+          </div>
+          <div class="q-text-answer form-group" style="display:none;">
+            <label>Correct answer (exact match, not case-sensitive)</label>
+            <input type="text" name="text_answer" value="{{ row.question.text_answer or '' }}">
+          </div>
+          <div class="q-matching form-group" style="display:none;">
+            <label>Prompt / correct match pairs</label>
+            {% if row.question.question_type == 'matching' %}
+              {% for choice in row.choices %}
+              <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                <input type="text" name="prompt_text" value="{{ choice.choice_text }}" placeholder="Prompt" style="flex:1;">
+                <input type="text" name="match_text" value="{{ choice.match_text }}" placeholder="Correct match" style="flex:1;">
+                <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+              </div>
+              {% endfor %}
+            {% else %}
+              <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                <input type="text" name="prompt_text" placeholder="Prompt 1" style="flex:1;">
+                <input type="text" name="match_text" placeholder="Correct match 1" style="flex:1;">
+                <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+              </div>
+              <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                <input type="text" name="prompt_text" placeholder="Prompt 2" style="flex:1;">
+                <input type="text" name="match_text" placeholder="Correct match 2" style="flex:1;">
+                <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+              </div>
+            {% endif %}
+            <button type="button" class="btn btn-secondary btn-small q-add-pair">+ Add Pair</button>
+          </div>
+          <p class="form-hint">Editing this question clears any previously recorded answers for it (overall scores are unaffected).</p>
+          <button type="submit" class="btn btn-primary btn-small">Save Question</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty-state">No questions yet. Add one below.</p>
+  {% endfor %}
+</div>
+
+{% if can('manage_quizzes') %}
+<div class="card qform" style="max-width:640px;">
+  <h3>Add a Question</h3>
+  <form method="post" action="{{ url_for('add_quiz_question', quiz_id=quiz.id) }}">
+    <div class="form-group">
+      <label for="question_text">Question</label>
+      <input type="text" id="question_text" name="question_text" required>
+    </div>
+    <div class="form-group">
+      <label>Question Type</label>
+      <select name="question_type" class="q-type-select">
+        <option value="single_choice">Multiple choice (single answer)</option>
+        <option value="multi_choice">Multiple choice (multiple answers)</option>
+        <option value="text">Text answer</option>
+        <option value="matching">Matching</option>
+      </select>
+    </div>
+    <div class="q-choices">
+      <div class="q-choice-row checkbox-row form-group">
+        <input type="radio" name="correct_index" value="0" class="q-correct-radio" checked>
+        <input type="checkbox" name="correct_indices" value="0" class="q-correct-checkbox" style="display:none;">
+        <input type="text" name="choice_text" placeholder="Choice 1" class="q-choice-text" style="flex:1;">
+        <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+      </div>
+      <div class="q-choice-row checkbox-row form-group">
+        <input type="radio" name="correct_index" value="1" class="q-correct-radio">
+        <input type="checkbox" name="correct_indices" value="1" class="q-correct-checkbox" style="display:none;">
+        <input type="text" name="choice_text" placeholder="Choice 2" class="q-choice-text" style="flex:1;">
+        <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+      </div>
+      <button type="button" class="btn btn-secondary btn-small q-add-choice">+ Add Choice</button>
+    </div>
+    <div class="q-text-answer form-group" style="display:none;">
+      <label>Correct answer (exact match, not case-sensitive)</label>
+      <input type="text" name="text_answer">
+    </div>
+    <div class="q-matching form-group" style="display:none;">
+      <label>Prompt / correct match pairs</label>
+      <p class="form-hint">Employees see the prompts with the matches shuffled and pick the right one for each.</p>
+      <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+        <input type="text" name="prompt_text" placeholder="Prompt 1" style="flex:1;">
+        <input type="text" name="match_text" placeholder="Correct match 1" style="flex:1;">
+        <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+      </div>
+      <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+        <input type="text" name="prompt_text" placeholder="Prompt 2" style="flex:1;">
+        <input type="text" name="match_text" placeholder="Correct match 2" style="flex:1;">
+        <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+      </div>
+      <button type="button" class="btn btn-secondary btn-small q-add-pair">+ Add Pair</button>
+    </div>
+    <button type="submit" class="btn btn-primary">Add Question</button>
+  </form>
+</div>
+
+<div class="card confirm-box">
+  <p>Deleting this quiz removes all its questions, checklist entries, and every employee's results.</p>
+  <form method="post" action="{{ url_for('delete_quiz', quiz_id=quiz.id) }}">
+    <div class="form-group">
+      <label for="confirm">Type "delete" to confirm</label>
+      <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+    </div>
+    <button type="submit" class="btn btn-danger">Delete Quiz</button>
+  </form>
+</div>
+{% endif %}
+
+<script src="{{ url_for('static', filename='quiz_builder.js') }}"></script>
+{% endblock %}

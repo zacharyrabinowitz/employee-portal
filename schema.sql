@@ -1,3 +1,9 @@
+DROP TABLE IF EXISTS master_checklist_items;
+DROP TABLE IF EXISTS quiz_attempt_answers;
+DROP TABLE IF EXISTS quiz_attempts;
+DROP TABLE IF EXISTS quiz_choices;
+DROP TABLE IF EXISTS quiz_questions;
+DROP TABLE IF EXISTS quizzes;
 DROP TABLE IF EXISTS employee_uploads;
 DROP TABLE IF EXISTS role_permissions;
 DROP TABLE IF EXISTS portal_settings;
@@ -156,4 +162,59 @@ CREATE TABLE employee_uploads (
     file_path TEXT NOT NULL,
     onboarding_step_id INTEGER REFERENCES onboarding_steps(id),
     uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE quizzes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    description TEXT,
+    training_module_id INTEGER REFERENCES training_modules(id),
+    passing_score INTEGER NOT NULL DEFAULT 70,
+    is_onboarding INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE quiz_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quiz_id INTEGER NOT NULL REFERENCES quizzes(id),
+    question_text TEXT NOT NULL,
+    question_type TEXT NOT NULL DEFAULT 'single_choice',
+    text_answer TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE quiz_choices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL REFERENCES quiz_questions(id),
+    choice_text TEXT NOT NULL,
+    match_text TEXT,
+    is_correct INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE quiz_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quiz_id INTEGER NOT NULL REFERENCES quizzes(id),
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    score INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    passed INTEGER NOT NULL DEFAULT 0,
+    submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE quiz_attempt_answers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id INTEGER NOT NULL REFERENCES quiz_attempts(id),
+    question_id INTEGER NOT NULL REFERENCES quiz_questions(id),
+    choice_id INTEGER REFERENCES quiz_choices(id),
+    text_answer TEXT,
+    is_correct INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE master_checklist_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    step_name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

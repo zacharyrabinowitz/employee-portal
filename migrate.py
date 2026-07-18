@@ -174,6 +174,105 @@ def migrate():
         conn.execute("ALTER TABLE documents ADD COLUMN requires_upload INTEGER NOT NULL DEFAULT 0")
         print("Added documents.requires_upload")
 
+    if not table_exists(conn, "quizzes"):
+        conn.execute(
+            """CREATE TABLE quizzes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                training_module_id INTEGER REFERENCES training_modules(id),
+                passing_score INTEGER NOT NULL DEFAULT 70,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        print("Created quizzes table")
+
+    if not table_exists(conn, "quiz_questions"):
+        conn.execute(
+            """CREATE TABLE quiz_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quiz_id INTEGER NOT NULL REFERENCES quizzes(id),
+                question_text TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        print("Created quiz_questions table")
+
+    if not table_exists(conn, "quiz_choices"):
+        conn.execute(
+            """CREATE TABLE quiz_choices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER NOT NULL REFERENCES quiz_questions(id),
+                choice_text TEXT NOT NULL,
+                is_correct INTEGER NOT NULL DEFAULT 0,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        print("Created quiz_choices table")
+
+    if not table_exists(conn, "quiz_attempts"):
+        conn.execute(
+            """CREATE TABLE quiz_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quiz_id INTEGER NOT NULL REFERENCES quizzes(id),
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                score INTEGER NOT NULL,
+                total INTEGER NOT NULL,
+                passed INTEGER NOT NULL DEFAULT 0,
+                submitted_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        print("Created quiz_attempts table")
+
+    if not table_exists(conn, "quiz_attempt_answers"):
+        conn.execute(
+            """CREATE TABLE quiz_attempt_answers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                attempt_id INTEGER NOT NULL REFERENCES quiz_attempts(id),
+                question_id INTEGER NOT NULL REFERENCES quiz_questions(id),
+                choice_id INTEGER REFERENCES quiz_choices(id),
+                is_correct INTEGER NOT NULL DEFAULT 0
+            )"""
+        )
+        print("Created quiz_attempt_answers table")
+
+    if not table_exists(conn, "master_checklist_items"):
+        conn.execute(
+            """CREATE TABLE master_checklist_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                step_name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        # Preserve current behavior: every employee has always gotten this task
+        # automatically. Seeding it here means existing installs keep behaving
+        # exactly the same after upgrading, but now it's editable in Settings.
+        conn.execute(
+            "INSERT INTO master_checklist_items (step_name, sort_order) VALUES ('Review Company Policies', 0)"
+        )
+        print("Created master_checklist_items table (seeded with 'Review Company Policies')")
+
+    if not column_exists(conn, "quiz_questions", "question_type"):
+        conn.execute(
+            "ALTER TABLE quiz_questions ADD COLUMN question_type TEXT NOT NULL DEFAULT 'single_choice'"
+        )
+        conn.execute("ALTER TABLE quiz_questions ADD COLUMN text_answer TEXT")
+        print("Added quiz_questions.question_type, quiz_questions.text_answer")
+
+    if not column_exists(conn, "quiz_attempt_answers", "text_answer"):
+        conn.execute("ALTER TABLE quiz_attempt_answers ADD COLUMN text_answer TEXT")
+        print("Added quiz_attempt_answers.text_answer")
+
+    if not column_exists(conn, "quizzes", "is_onboarding"):
+        conn.execute("ALTER TABLE quizzes ADD COLUMN is_onboarding INTEGER NOT NULL DEFAULT 0")
+        print("Added quizzes.is_onboarding")
+
+    if not column_exists(conn, "quiz_choices", "match_text"):
+        conn.execute("ALTER TABLE quiz_choices ADD COLUMN match_text TEXT")
+        print("Added quiz_choices.match_text (for matching-type questions)")
+
     conn.commit()
     conn.close()
     print("Migration complete. No existing data was touched.")

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }} · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ quiz.title }}</h1>
+    <p class="page-subtitle">{{ quiz.description or ('Passing score: ' ~ quiz.passing_score ~ '%') }}</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('employee_quizzes') }}">Back to Quizzes</a>
+</div>
+
+<form method="post" action="{{ url_for('submit_quiz', quiz_id=quiz.id) }}">
+  {% for row in question_rows %}
+  <div class="card">
+    <h3>{{ loop.index }}. {{ row.question.question_text }}</h3>
+    {% if row.question.question_type == 'text' %}
+      <div class="form-group">
+        <input type="text" name="question_{{ row.question.id }}" required>
+      </div>
+    {% elif row.question.question_type == 'matching' %}
+      {% for choice in row.choices %}
+      <div class="form-group">
+        <label>{{ choice.choice_text }}</label>
+        <select name="question_{{ row.question.id }}_choice_{{ choice.id }}" required>
+          <option value="">Choose a match...</option>
+          {% for option in row.match_options %}
+            <option value="{{ option }}">{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+    {% elif row.question.question_type == 'multi_choice' %}
+      <p class="form-hint">Select all that apply.</p>
+      {% for choice in row.choices %}
+      <div class="checkbox-row form-group">
+        <input type="checkbox" name="question_{{ row.question.id }}" value="{{ choice.id }}" id="choice_{{ choice.id }}">
+        <label for="choice_{{ choice.id }}" style="margin:0; font-weight:400;">{{ choice.choice_text }}</label>
+      </div>
+      {% endfor %}
+    {% else %}
+      {% for choice in row.choices %}
+      <div class="checkbox-row form-group">
+        <input type="radio" name="question_{{ row.question.id }}" value="{{ choice.id }}" id="choice_{{ choice.id }}" required>
+        <label for="choice_{{ choice.id }}" style="margin:0; font-weight:400;">{{ choice.choice_text }}</label>
+      </div>
+      {% endfor %}
+    {% endif %}
+  </div>
+  {% endfor %}
+  <button type="submit" class="btn btn-primary">Submit Quiz</button>
+</form>
+{% endblock %}

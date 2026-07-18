@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Quizzes · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Quizzes</h1>
+    <p class="page-subtitle">Test your knowledge. You can retake a quiz any time.</p>
+  </div>
+</div>
+
+<div class="card">
+  {% for row in quiz_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ row.quiz.title }}</strong>
+        <span>
+          {{ row.question_count }} question(s)
+          {% if row.best_attempt %}
+            · Best score: {{ row.best_attempt.score }}/{{ row.best_attempt.total }}
+            {% if row.best_attempt.passed %} (Passed){% else %} (Not passed yet){% endif %}
+          {% endif %}
+        </span>
+      </div>
+      {% if row.question_count %}
+        <a class="btn btn-primary btn-small" href="{{ url_for('take_quiz', quiz_id=row.quiz.id) }}">
+          {% if row.best_attempt %}Retake Quiz{% else %}Take Quiz{% endif %}
+        </a>
+      {% else %}
+        <span class="badge badge-muted">Not ready yet</span>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="empty-state">No quizzes are available yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

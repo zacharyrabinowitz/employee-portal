@@ -86,6 +86,25 @@
       <p class="empty-state">No training modules exist yet. <a href="{{ url_for('add_training_module') }}">Create one first.</a></p>
     {% endif %}
   </div>
+
+  <div class="card">
+    <h3>Add a Quiz</h3>
+    {% if quizzes %}
+    <form method="post" action="{{ url_for('add_template_quiz_item', template_id=template.id) }}">
+      <div class="form-group">
+        <label for="quiz_id">Quiz</label>
+        <select id="quiz_id" name="quiz_id" required>
+          {% for quiz in quizzes %}
+            <option value="{{ quiz.id }}">{{ quiz.title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-secondary btn-small">Add Quiz</button>
+    </form>
+    {% else %}
+      <p class="empty-state">No quizzes exist yet. <a href="{{ url_for('create_quiz') }}">Create one first.</a></p>
+    {% endif %}
+  </div>
 </div>
 {% endif %}
 

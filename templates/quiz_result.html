@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }} Result · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ quiz.title }}</h1>
+    <p class="page-subtitle">Your result</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('employee_quizzes') }}">Back to Quizzes</a>
+</div>
+
+<div class="card">
+  <h3>{{ score }}/{{ total }} ({{ pct }}%)</h3>
+  {% if passed %}
+    <span class="badge badge-success">Passed</span>
+  {% else %}
+    <span class="badge badge-warning">Not passed — needed {{ quiz.passing_score }}%</span>
+  {% endif %}
+</div>
+
+{% for row in review_rows %}
+<div class="card">
+  <h3>{{ loop.index }}. {{ row.question.question_text }}</h3>
+  {% if row.question.question_type == 'text' %}
+    <div style="padding:0.35rem 0;">
+      {% if row.question_correct %}
+        <strong style="color:var(--success);">Your answer: {{ row.text_given or '(blank)' }} ✓ Correct</strong>
+      {% else %}
+        <div><strong style="color:var(--error);">Your answer: {{ row.text_given or '(blank)' }}</strong></div>
+        <div style="color:var(--success);">Correct answer: {{ row.question.text_answer }}</div>
+      {% endif %}
+    </div>
+  {% elif row.question.question_type == 'matching' %}
+    {% for choice in row.choices %}
+      {% set given = row.matching_selections.get(choice.id, '') %}
+      <div style="padding:0.35rem 0;">
+        <strong>{{ choice.choice_text }}:</strong>
+        {% if given == choice.match_text %}
+          <span style="color:var(--success);">{{ given or '(blank)' }} ✓ Correct</span>
+        {% else %}
+          <span style="color:var(--error);">{{ given or '(blank)' }}</span>
+          <span style="color:var(--success);"> — Correct match: {{ choice.match_text }}</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% else %}
+    {% for choice in row.choices %}
+      <div style="padding:0.35rem 0;">
+        {% if choice.is_correct %}
+          <strong style="color:var(--success);">{{ choice.choice_text }} ✓ Correct answer</strong>
+        {% elif choice.id in row.selected_choice_ids %}
+          <strong style="color:var(--error);">{{ choice.choice_text }} — Your answer</strong>
+        {% else %}
+          <span style="color:var(--text-muted);">{{ choice.choice_text }}</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endfor %}
+
+<a class="btn btn-primary" href="{{ url_for('employee_quizzes') }}">Back to Quizzes</a>
+{% endblock %}

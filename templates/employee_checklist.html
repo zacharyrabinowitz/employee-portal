@@ -34,11 +34,15 @@
           <a class="btn btn-secondary btn-small" href="{{ url_for('document_sign', document_id=step.related_id) }}">View</a>
         {% elif step.step_type == 'training' %}
           <a class="btn btn-secondary btn-small" href="{{ url_for('training_module_view', module_id=step.related_id) }}">View</a>
+        {% elif step.step_type == 'quiz' %}
+          <a class="btn btn-secondary btn-small" href="{{ url_for('take_quiz', quiz_id=step.related_id) }}">Retake</a>
         {% endif %}
       {% elif step.step_type == 'document' %}
         <a class="btn btn-primary btn-small" href="{{ url_for('document_sign', document_id=step.related_id) }}">Sign Document</a>
       {% elif step.step_type == 'training' %}
         <a class="btn btn-primary btn-small" href="{{ url_for('training_module_view', module_id=step.related_id) }}">Complete Training</a>
+      {% elif step.step_type == 'quiz' %}
+        <a class="btn btn-primary btn-small" href="{{ url_for('take_quiz', quiz_id=step.related_id) }}">Take Quiz</a>
       {% elif step.step_type == 'upload' %}
         <form method="post" action="{{ url_for('fulfill_upload_step', step_id=step.id) }}" enctype="multipart/form-data" class="btn-row" style="align-items:center;">
           <input type="file" name="upload_file" required accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" style="max-width:220px;">

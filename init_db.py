@@ -55,12 +55,17 @@ def init_db():
         "manage_employees",
         "manage_documents",
         "manage_training",
+        "manage_quizzes",
         "manage_onboarding_checklists",
         "manage_settings",
     ):
         conn.execute(
             "INSERT INTO role_permissions (role, permission) VALUES ('Manager', ?)", (key,)
         )
+
+    conn.execute(
+        "INSERT INTO master_checklist_items (step_name, sort_order) VALUES ('Review Company Policies', 0)"
+    )
 
     conn.commit()
     conn.close()

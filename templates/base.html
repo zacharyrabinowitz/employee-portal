@@ -21,10 +21,12 @@
         <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if path.startswith('/admin/dashboard') or path == '/' else '' }}">🏠 Dashboard</a>
         <a href="{{ url_for('admin_documents') }}" class="{{ 'active' if path.startswith('/admin/documents') or path.startswith('/employee/documents') else '' }}">📄 Documents</a>
         <a href="{{ url_for('admin_training') }}" class="{{ 'active' if path.startswith('/admin/training') else '' }}">🎓 Training</a>
+        <a href="{{ url_for('admin_quizzes') }}" class="{{ 'active' if path.startswith('/admin/quizzes') else '' }}">📝 Quizzes</a>
         <a href="{{ url_for('settings_home') }}" class="{{ 'active' if path.startswith('/admin/settings') else '' }}">⚙️ Settings</a>
       {% else %}
         <a href="{{ url_for('employee_dashboard') }}" class="{{ 'active' if path.startswith('/employee/dashboard') or path == '/' else '' }}">🏠 Dashboard</a>
         <a href="{{ url_for('employee_checklist') }}" class="{{ 'active' if path.startswith('/employee/checklist') else '' }}">✅ Onboarding Checklist</a>
+        <a href="{{ url_for('employee_quizzes') }}" class="{{ 'active' if path.startswith('/employee/quizzes') else '' }}">📝 Quizzes</a>
         <a href="{{ url_for('employee_profile_self') }}" class="{{ 'active' if path.startswith('/employee/profile') else '' }}">👤 My Profile</a>
       {% endif %}
     </div>

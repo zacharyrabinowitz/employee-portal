@@ -2,6 +2,7 @@ import io
 import json
 import mimetypes
 import os
+import random
 import re
 import secrets
 import shutil
@@ -231,6 +232,7 @@ PERMISSIONS = [
     ("manage_employees", "Add and edit employees; manage their notes and document requests"),
     ("manage_documents", "Create and delete policy documents"),
     ("manage_training", "Create, edit, and delete training modules; assign training"),
+    ("manage_quizzes", "Create, edit, and delete quizzes; view results"),
     ("manage_onboarding_checklists", "Create and manage onboarding checklist templates"),
     ("manage_settings", "Access Settings (signup page customization, etc.)"),
 ]
@@ -368,6 +370,15 @@ def apply_onboarding_template_items(db, employee_id, template_id):
             if already:
                 continue
 
+        if item["step_type"] == "quiz" and item["related_id"]:
+            already = db.execute(
+                """SELECT 1 FROM onboarding_steps
+                   WHERE employee_id = ? AND step_type = 'quiz' AND related_id = ?""",
+                (employee_id, item["related_id"]),
+            ).fetchone()
+            if already:
+                continue
+
         if item["step_type"] == "task":
             already = db.execute(
                 """SELECT 1 FROM onboarding_steps
@@ -386,13 +397,19 @@ def apply_onboarding_template_items(db, employee_id, template_id):
 
 def seed_onboarding_steps(db, employee_id):
     """Give a newly created employee a baseline onboarding checklist:
-    one step per existing signature-required document, every onboarding-required
-    training module, plus a generic task."""
-    db.execute(
-        """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
-           VALUES (?, 'Review Company Policies', 'task', NULL)""",
-        (employee_id,),
-    )
+    every master checklist item, one step per existing signature-required
+    document, every upload-required document, and every onboarding-required
+    training module."""
+    master_items = db.execute(
+        "SELECT step_name FROM master_checklist_items ORDER BY sort_order, id"
+    ).fetchall()
+    for item in master_items:
+        db.execute(
+            """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+               VALUES (?, ?, 'task', NULL)""",
+            (employee_id, item["step_name"]),
+        )
+
     docs = db.execute(
         "SELECT id, title FROM documents WHERE requires_signature = 1"
     ).fetchall()
@@ -419,6 +436,16 @@ def seed_onboarding_steps(db, employee_id):
     for mod in modules:
         assign_module_to_employee(db, mod["id"], mod["title"], employee_id)
 
+    onboarding_quizzes = db.execute(
+        "SELECT id, title FROM quizzes WHERE is_onboarding = 1"
+    ).fetchall()
+    for quiz in onboarding_quizzes:
+        db.execute(
+            """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+               VALUES (?, ?, 'quiz', ?)""",
+            (employee_id, f"Take Quiz: {quiz['title']}", quiz["id"]),
+        )
+
     employee = db.execute(
         "SELECT onboarding_template_id FROM employees WHERE id = ?", (employee_id,)
     ).fetchone()
@@ -439,6 +466,16 @@ def mark_training_step_complete(db, employee_id, module_id):
         """UPDATE onboarding_steps SET completed_at = ?
            WHERE employee_id = ? AND step_type = 'training' AND related_id = ? AND completed_at IS NULL""",
         (datetime.utcnow().isoformat(timespec="seconds"), employee_id, module_id),
+    )
+
+
+def mark_quiz_step_complete(db, employee_id, quiz_id):
+    """Only a passing attempt satisfies a quiz checklist step — a failed
+    attempt leaves it pending so the employee has to retake it."""
+    db.execute(
+        """UPDATE onboarding_steps SET completed_at = ?
+           WHERE employee_id = ? AND step_type = 'quiz' AND related_id = ? AND completed_at IS NULL""",
+        (datetime.utcnow().isoformat(timespec="seconds"), employee_id, quiz_id),
     )
 
 
@@ -647,6 +684,25 @@ def employee_profile_admin(employee_id):
         onboarding_link=onboarding_link,
         onboarding_template=onboarding_template,
     )
+
+
+@app.route("/admin/employees/checklist-steps/<int:step_id>/delete", methods=["POST"])
+def delete_employee_onboarding_step(step_id):
+    resp = require_permission("manage_employees")
+    if resp:
+        return resp
+
+    db = get_db()
+    step = db.execute("SELECT * FROM onboarding_steps WHERE id = ?", (step_id,)).fetchone()
+    if step is None:
+        flash("Checklist step not found.", "error")
+        return redirect(url_for("admin_dashboard"))
+
+    employee_id = step["employee_id"]
+    db.execute("DELETE FROM onboarding_steps WHERE id = ?", (step_id,))
+    db.commit()
+    flash(f'Removed "{step["step_name"]}" from the checklist.', "success")
+    return redirect(url_for("employee_profile_admin", employee_id=employee_id))
 
 
 @app.route("/admin/employees/<int:employee_id>/edit", methods=["GET", "POST"])
@@ -2240,6 +2296,918 @@ def training_module_view(module_id):
 
 
 # ---------------------------------------------------------------------------
+# Quizzes (admin/manager management + employee taking)
+# ---------------------------------------------------------------------------
+
+def delete_question_cascade(db, question_id):
+    """Remove a question along with its choices and any recorded answers that
+    reference it. Attempts themselves (score/total) are left alone — they're
+    a historical record of what an employee scored at the time."""
+    db.execute("DELETE FROM quiz_attempt_answers WHERE question_id = ?", (question_id,))
+    db.execute("DELETE FROM quiz_choices WHERE question_id = ?", (question_id,))
+    db.execute("DELETE FROM quiz_questions WHERE id = ?", (question_id,))
+
+
+def delete_quiz_cascade(db, quiz_id):
+    question_ids = [
+        row["id"]
+        for row in db.execute("SELECT id FROM quiz_questions WHERE quiz_id = ?", (quiz_id,)).fetchall()
+    ]
+    for question_id in question_ids:
+        delete_question_cascade(db, question_id)
+    db.execute("DELETE FROM quiz_attempts WHERE quiz_id = ?", (quiz_id,))
+    db.execute(
+        "DELETE FROM onboarding_steps WHERE step_type = 'quiz' AND related_id = ?", (quiz_id,)
+    )
+    db.execute(
+        "DELETE FROM onboarding_template_items WHERE step_type = 'quiz' AND related_id = ?",
+        (quiz_id,),
+    )
+    db.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
+
+
+QUESTION_TYPES = {"single_choice", "multi_choice", "text", "matching"}
+
+
+def save_question_choices(db, question_id, choice_texts, correct_indices):
+    """Insert non-blank choices for a question. correct_indices (strings from
+    the form) mark which ones are correct; falls back to the first choice if
+    none resolve to a valid index, so a question is never left answerless."""
+    choices = [text.strip() for text in choice_texts if text.strip()]
+    if not choices:
+        return
+    correct_set = set()
+    for raw in correct_indices:
+        try:
+            i = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(choices):
+            correct_set.add(i)
+    if not correct_set:
+        correct_set = {0}
+    for i, text in enumerate(choices):
+        db.execute(
+            """INSERT INTO quiz_choices (question_id, choice_text, is_correct, sort_order)
+               VALUES (?, ?, ?, ?)""",
+            (question_id, text, 1 if i in correct_set else 0, i),
+        )
+
+
+def save_matching_pairs(db, question_id, prompt_texts, match_texts):
+    """Insert non-blank prompt/match pairs for a matching question. A pair is
+    only saved if both sides have text — a lone prompt or lone match with
+    nothing on the other side isn't a usable pair."""
+    pairs = []
+    for prompt, match in zip(prompt_texts, match_texts):
+        prompt = prompt.strip()
+        match = match.strip()
+        if prompt and match:
+            pairs.append((prompt, match))
+    for i, (prompt, match) in enumerate(pairs):
+        db.execute(
+            """INSERT INTO quiz_choices (question_id, choice_text, match_text, is_correct, sort_order)
+               VALUES (?, ?, ?, 1, ?)""",
+            (question_id, prompt, match, i),
+        )
+
+
+def save_quiz_question(
+    db, question_id, question_type, choice_texts, correct_indices, text_answer,
+    prompt_texts=None, match_texts=None,
+):
+    """Set a question's type and its answer data, replacing whatever was
+    there before. Used for both a brand-new question and an edit — clearing
+    old choices/answers first makes both cases the same code path."""
+    if question_type not in QUESTION_TYPES:
+        question_type = "single_choice"
+
+    db.execute("DELETE FROM quiz_attempt_answers WHERE question_id = ?", (question_id,))
+    db.execute("DELETE FROM quiz_choices WHERE question_id = ?", (question_id,))
+
+    if question_type == "text":
+        db.execute(
+            "UPDATE quiz_questions SET question_type = ?, text_answer = ? WHERE id = ?",
+            (question_type, text_answer.strip(), question_id),
+        )
+    elif question_type == "matching":
+        db.execute(
+            "UPDATE quiz_questions SET question_type = ?, text_answer = NULL WHERE id = ?",
+            (question_type, question_id),
+        )
+        save_matching_pairs(db, question_id, prompt_texts or [], match_texts or [])
+    else:
+        db.execute(
+            "UPDATE quiz_questions SET question_type = ?, text_answer = NULL WHERE id = ?",
+            (question_type, question_id),
+        )
+        save_question_choices(db, question_id, choice_texts, correct_indices)
+
+
+@app.route("/admin/quizzes")
+def admin_quizzes():
+    resp = require_admin_or_manager()
+    if resp:
+        return resp
+
+    db = get_db()
+    quizzes = db.execute("SELECT * FROM quizzes ORDER BY created_at DESC").fetchall()
+    quiz_rows = []
+    for quiz in quizzes:
+        question_count = db.execute(
+            "SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = ?", (quiz["id"],)
+        ).fetchone()[0]
+        attempt_count = db.execute(
+            "SELECT COUNT(*) FROM quiz_attempts WHERE quiz_id = ?", (quiz["id"],)
+        ).fetchone()[0]
+        quiz_rows.append(
+            {"quiz": quiz, "question_count": question_count, "attempt_count": attempt_count}
+        )
+
+    training_modules = db.execute("SELECT id, title FROM training_modules ORDER BY title").fetchall()
+    return render_template(
+        "admin_quizzes.html", quiz_rows=quiz_rows, training_modules=training_modules
+    )
+
+
+@app.route("/admin/quizzes/create", methods=["GET", "POST"])
+def create_quiz():
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        training_module_id = request.form.get("training_module_id") or None
+        is_onboarding = 1 if request.form.get("is_onboarding") == "on" else 0
+        try:
+            passing_score = max(0, min(100, int(request.form.get("passing_score", 70))))
+        except ValueError:
+            passing_score = 70
+
+        question_indices = request.form.getlist("question_indices")
+        if not title:
+            flash("Title is required.", "error")
+            return redirect(url_for("create_quiz"))
+        if not question_indices:
+            flash("Add at least one question.", "error")
+            return redirect(url_for("create_quiz"))
+
+        cur = db.execute(
+            """INSERT INTO quizzes (title, description, training_module_id, passing_score, is_onboarding)
+               VALUES (?, ?, ?, ?, ?)""",
+            (title, description, training_module_id, passing_score, is_onboarding),
+        )
+        quiz_id = cur.lastrowid
+
+        sort_order = 0
+        questions_added = 0
+        for i in question_indices:
+            question_text = request.form.get(f"q{i}_text", "").strip()
+            question_type = request.form.get(f"q{i}_type", "single_choice")
+            if question_type not in QUESTION_TYPES:
+                question_type = "single_choice"
+            if not question_text:
+                continue
+
+            qcur = db.execute(
+                """INSERT INTO quiz_questions (quiz_id, question_text, question_type, sort_order)
+                   VALUES (?, ?, ?, ?)""",
+                (quiz_id, question_text, question_type, sort_order),
+            )
+            question_id = qcur.lastrowid
+
+            if question_type == "text":
+                text_answer = request.form.get(f"q{i}_text_answer", "").strip()
+                db.execute(
+                    "UPDATE quiz_questions SET text_answer = ? WHERE id = ?",
+                    (text_answer, question_id),
+                )
+            elif question_type == "matching":
+                prompt_texts = request.form.getlist(f"q{i}_prompt_text")
+                match_texts = request.form.getlist(f"q{i}_match_text")
+                save_matching_pairs(db, question_id, prompt_texts, match_texts)
+            else:
+                choice_texts = request.form.getlist(f"q{i}_choice_text")
+                if question_type == "multi_choice":
+                    correct_indices = request.form.getlist(f"q{i}_correct_indices")
+                else:
+                    correct_indices = [request.form.get(f"q{i}_correct_index", "0")]
+                save_question_choices(db, question_id, choice_texts, correct_indices)
+
+            sort_order += 1
+            questions_added += 1
+
+        if questions_added == 0:
+            db.rollback()
+            flash("Add at least one question with text.", "error")
+            return redirect(url_for("create_quiz"))
+
+        if is_onboarding:
+            employees = db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
+            for emp in employees:
+                db.execute(
+                    """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+                       VALUES (?, ?, 'quiz', ?)""",
+                    (emp["id"], f"Take Quiz: {title}", quiz_id),
+                )
+
+        db.commit()
+        flash("Quiz created.", "success")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    training_modules = db.execute("SELECT id, title FROM training_modules ORDER BY title").fetchall()
+    return render_template("create_quiz.html", training_modules=training_modules)
+
+
+@app.route("/admin/quizzes/<int:quiz_id>")
+def quiz_detail_admin(quiz_id):
+    resp = require_admin_or_manager()
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    questions = db.execute(
+        "SELECT * FROM quiz_questions WHERE quiz_id = ? ORDER BY sort_order, id", (quiz_id,)
+    ).fetchall()
+    question_rows = []
+    for question in questions:
+        choices = db.execute(
+            "SELECT * FROM quiz_choices WHERE question_id = ? ORDER BY sort_order, id",
+            (question["id"],),
+        ).fetchall()
+        question_rows.append({"question": question, "choices": choices})
+
+    training_modules = db.execute("SELECT id, title FROM training_modules ORDER BY title").fetchall()
+    attempt_count = db.execute(
+        "SELECT COUNT(*) FROM quiz_attempts WHERE quiz_id = ?", (quiz_id,)
+    ).fetchone()[0]
+
+    assigned_employee_ids = {
+        row["employee_id"]
+        for row in db.execute(
+            "SELECT DISTINCT employee_id FROM onboarding_steps WHERE step_type = 'quiz' AND related_id = ?",
+            (quiz_id,),
+        ).fetchall()
+    }
+    assignable_employees = [
+        emp
+        for emp in db.execute(
+            "SELECT * FROM employees WHERE role = 'Employee' ORDER BY name"
+        ).fetchall()
+        if emp["id"] not in assigned_employee_ids
+    ]
+
+    return render_template(
+        "quiz_detail_admin.html",
+        quiz=quiz,
+        question_rows=question_rows,
+        training_modules=training_modules,
+        attempt_count=attempt_count,
+        assignable_employees=assignable_employees,
+    )
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/edit", methods=["POST"])
+def edit_quiz(quiz_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT id FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    title = request.form.get("title", "").strip()
+    description = request.form.get("description", "").strip()
+    training_module_id = request.form.get("training_module_id") or None
+    try:
+        passing_score = max(0, min(100, int(request.form.get("passing_score", 70))))
+    except ValueError:
+        passing_score = 70
+
+    if not title:
+        flash("Title is required.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    db.execute(
+        """UPDATE quizzes SET title = ?, description = ?, training_module_id = ?, passing_score = ?
+           WHERE id = ?""",
+        (title, description, training_module_id, passing_score, quiz_id),
+    )
+    db.commit()
+    flash("Quiz updated.", "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/toggle-onboarding", methods=["POST"])
+def toggle_quiz_onboarding(quiz_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    new_value = 0 if quiz["is_onboarding"] else 1
+    db.execute("UPDATE quizzes SET is_onboarding = ? WHERE id = ?", (new_value, quiz_id))
+
+    if new_value:
+        employees = db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
+        for emp in employees:
+            already = db.execute(
+                """SELECT 1 FROM onboarding_steps
+                   WHERE employee_id = ? AND step_type = 'quiz' AND related_id = ?""",
+                (emp["id"], quiz_id),
+            ).fetchone()
+            if already:
+                continue
+            db.execute(
+                """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+                   VALUES (?, ?, 'quiz', ?)""",
+                (emp["id"], f"Take Quiz: {quiz['title']}", quiz_id),
+            )
+        flash(f'"{quiz["title"]}" added to every employee\'s checklist.', "success")
+    else:
+        flash(f'"{quiz["title"]}" removed from new-employee onboarding checklists.', "success")
+
+    db.commit()
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/assign", methods=["POST"])
+def assign_quiz(quiz_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    employee_id = request.form.get("employee_id")
+    employee = db.execute(
+        "SELECT * FROM employees WHERE id = ? AND role = 'Employee'", (employee_id,)
+    ).fetchone()
+    if employee is None:
+        flash("Please choose an employee.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    already = db.execute(
+        """SELECT 1 FROM onboarding_steps
+           WHERE employee_id = ? AND step_type = 'quiz' AND related_id = ?""",
+        (employee["id"], quiz_id),
+    ).fetchone()
+    if already:
+        flash(f"{employee['name']} already has this quiz on their checklist.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    db.execute(
+        """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+           VALUES (?, ?, 'quiz', ?)""",
+        (employee["id"], f"Take Quiz: {quiz['title']}", quiz_id),
+    )
+    db.commit()
+    flash(f"Assigned to {employee['name']}.", "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/delete", methods=["POST"])
+def delete_quiz(quiz_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    confirm = request.form.get("confirm", "").strip().lower()
+    if confirm != "delete":
+        flash('You must type "delete" to confirm.', "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    db = get_db()
+    quiz = db.execute("SELECT title FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    delete_quiz_cascade(db, quiz_id)
+    db.commit()
+    flash(f'"{quiz["title"]}" deleted.', "success")
+    return redirect(url_for("admin_quizzes"))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/questions", methods=["POST"])
+def add_quiz_question(quiz_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT id FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    question_text = request.form.get("question_text", "").strip()
+    question_type = request.form.get("question_type", "single_choice")
+    if question_type not in QUESTION_TYPES:
+        question_type = "single_choice"
+    choice_texts = request.form.getlist("choice_text")
+    text_answer = request.form.get("text_answer", "")
+    prompt_texts = request.form.getlist("prompt_text")
+    match_texts = request.form.getlist("match_text")
+    if question_type == "multi_choice":
+        correct_indices = request.form.getlist("correct_indices")
+    else:
+        correct_indices = [request.form.get("correct_index", "0")]
+
+    if not question_text:
+        flash("A question needs text.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+    if question_type == "text" and not text_answer.strip():
+        flash("Give the correct answer for this text question.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+    if question_type == "matching" and not any(
+        p.strip() and m.strip() for p, m in zip(prompt_texts, match_texts)
+    ):
+        flash("A matching question needs at least one complete prompt/match pair.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+    if question_type not in ("text", "matching") and not any(text.strip() for text in choice_texts):
+        flash("A choice-based question needs at least one answer choice.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    max_order = db.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM quiz_questions WHERE quiz_id = ?", (quiz_id,)
+    ).fetchone()[0]
+    cur = db.execute(
+        """INSERT INTO quiz_questions (quiz_id, question_text, sort_order) VALUES (?, ?, ?)""",
+        (quiz_id, question_text, max_order + 1),
+    )
+    save_quiz_question(
+        db, cur.lastrowid, question_type, choice_texts, correct_indices, text_answer,
+        prompt_texts, match_texts,
+    )
+    db.commit()
+    flash("Question added.", "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/questions/<int:question_id>/edit", methods=["POST"])
+def edit_quiz_question(question_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    question = db.execute(
+        "SELECT * FROM quiz_questions WHERE id = ?", (question_id,)
+    ).fetchone()
+    if question is None:
+        flash("Question not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    quiz_id = question["quiz_id"]
+    question_text = request.form.get("question_text", "").strip()
+    question_type = request.form.get("question_type", "single_choice")
+    if question_type not in QUESTION_TYPES:
+        question_type = "single_choice"
+    choice_texts = request.form.getlist("choice_text")
+    text_answer = request.form.get("text_answer", "")
+    prompt_texts = request.form.getlist("prompt_text")
+    match_texts = request.form.getlist("match_text")
+    if question_type == "multi_choice":
+        correct_indices = request.form.getlist("correct_indices")
+    else:
+        correct_indices = [request.form.get("correct_index", "0")]
+
+    if not question_text:
+        flash("A question needs text.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+    if question_type == "text" and not text_answer.strip():
+        flash("Give the correct answer for this text question.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+    if question_type == "matching" and not any(
+        p.strip() and m.strip() for p, m in zip(prompt_texts, match_texts)
+    ):
+        flash("A matching question needs at least one complete prompt/match pair.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+    if question_type not in ("text", "matching") and not any(text.strip() for text in choice_texts):
+        flash("A choice-based question needs at least one answer choice.", "error")
+        return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+    db.execute("UPDATE quiz_questions SET question_text = ? WHERE id = ?", (question_text, question_id))
+    # save_quiz_question clears old choices/recorded answers before writing the
+    # new ones — any previously recorded answers for this question no longer
+    # mean anything once it's edited. Overall attempt scores stay as they were.
+    save_quiz_question(
+        db, question_id, question_type, choice_texts, correct_indices, text_answer,
+        prompt_texts, match_texts,
+    )
+    db.commit()
+    flash("Question updated.", "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/questions/<int:question_id>/delete", methods=["POST"])
+def delete_quiz_question(question_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    question = db.execute(
+        "SELECT quiz_id FROM quiz_questions WHERE id = ?", (question_id,)
+    ).fetchone()
+    if question is None:
+        flash("Question not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    quiz_id = question["quiz_id"]
+    delete_question_cascade(db, question_id)
+    db.commit()
+    flash("Question removed.", "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/results")
+def quiz_results(quiz_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    attempts = db.execute(
+        """SELECT quiz_attempts.*, employees.name AS employee_name
+           FROM quiz_attempts
+           JOIN employees ON employees.id = quiz_attempts.employee_id
+           WHERE quiz_attempts.quiz_id = ?
+           ORDER BY quiz_attempts.submitted_at DESC""",
+        (quiz_id,),
+    ).fetchall()
+    not_attempted = db.execute(
+        """SELECT * FROM employees WHERE role = 'Employee' AND id NOT IN (
+             SELECT employee_id FROM quiz_attempts WHERE quiz_id = ?
+           )""",
+        (quiz_id,),
+    ).fetchall()
+
+    return render_template(
+        "quiz_results.html", quiz=quiz, attempts=attempts, not_attempted=not_attempted
+    )
+
+
+@app.route("/employee/quizzes")
+def employee_quizzes():
+    resp = require_login()
+    if resp:
+        return resp
+
+    db = get_db()
+    quizzes = db.execute("SELECT * FROM quizzes ORDER BY created_at DESC").fetchall()
+    quiz_rows = []
+    for quiz in quizzes:
+        question_count = db.execute(
+            "SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = ?", (quiz["id"],)
+        ).fetchone()[0]
+        best_attempt = db.execute(
+            """SELECT * FROM quiz_attempts WHERE quiz_id = ? AND employee_id = ?
+               ORDER BY score DESC, submitted_at DESC LIMIT 1""",
+            (quiz["id"], session["user_id"]),
+        ).fetchone()
+        quiz_rows.append(
+            {"quiz": quiz, "question_count": question_count, "best_attempt": best_attempt}
+        )
+
+    return render_template("employee_quizzes.html", quiz_rows=quiz_rows)
+
+
+@app.route("/employee/quizzes/<int:quiz_id>/take")
+def take_quiz(quiz_id):
+    resp = require_login()
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("employee_quizzes"))
+
+    questions = db.execute(
+        "SELECT * FROM quiz_questions WHERE quiz_id = ? ORDER BY sort_order, id", (quiz_id,)
+    ).fetchall()
+    question_rows = []
+    for question in questions:
+        choices = db.execute(
+            "SELECT * FROM quiz_choices WHERE question_id = ? ORDER BY sort_order, id",
+            (question["id"],),
+        ).fetchall()
+        row = {"question": question, "choices": choices}
+        if question["question_type"] == "matching":
+            match_options = [c["match_text"] for c in choices]
+            random.shuffle(match_options)
+            row["match_options"] = match_options
+        question_rows.append(row)
+
+    if not question_rows:
+        flash("This quiz doesn't have any questions yet.", "error")
+        return redirect(url_for("employee_quizzes"))
+
+    return render_template("take_quiz.html", quiz=quiz, question_rows=question_rows)
+
+
+@app.route("/employee/quizzes/<int:quiz_id>/submit", methods=["POST"])
+def submit_quiz(quiz_id):
+    resp = require_login()
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("employee_quizzes"))
+
+    questions = db.execute(
+        "SELECT * FROM quiz_questions WHERE quiz_id = ? ORDER BY sort_order, id", (quiz_id,)
+    ).fetchall()
+
+    score = 0
+    graded = []  # per-question: question, choices, selected_choice_ids, text_given, question_correct
+    for question in questions:
+        qtype = question["question_type"]
+        choices = db.execute(
+            "SELECT * FROM quiz_choices WHERE question_id = ? ORDER BY sort_order, id",
+            (question["id"],),
+        ).fetchall()
+
+        if qtype == "text":
+            given = request.form.get(f"question_{question['id']}", "").strip()
+            expected = (question["text_answer"] or "").strip()
+            is_correct = bool(expected) and given.lower() == expected.lower()
+            if is_correct:
+                score += 1
+            graded.append(
+                {
+                    "question": question,
+                    "choices": choices,
+                    "selected_choice_ids": set(),
+                    "text_given": given,
+                    "question_correct": is_correct,
+                    "rows_to_insert": [
+                        {"choice_id": None, "text_answer": given, "is_correct": 1 if is_correct else 0}
+                    ],
+                }
+            )
+        elif qtype == "matching":
+            selections = {}
+            rows_to_insert = []
+            all_correct = bool(choices)
+            for choice in choices:
+                given = request.form.get(f"question_{question['id']}_choice_{choice['id']}", "").strip()
+                selections[choice["id"]] = given
+                is_pair_correct = bool(given) and given == (choice["match_text"] or "")
+                if not is_pair_correct:
+                    all_correct = False
+                rows_to_insert.append(
+                    {
+                        "choice_id": choice["id"],
+                        "text_answer": given,
+                        "is_correct": 1 if is_pair_correct else 0,
+                    }
+                )
+            if all_correct:
+                score += 1
+            graded.append(
+                {
+                    "question": question,
+                    "choices": choices,
+                    "selected_choice_ids": set(),
+                    "text_given": None,
+                    "question_correct": all_correct,
+                    "rows_to_insert": rows_to_insert,
+                    "matching_selections": selections,
+                }
+            )
+        elif qtype == "multi_choice":
+            selected_ids = set(request.form.getlist(f"question_{question['id']}"))
+            correct_ids = {str(c["id"]) for c in choices if c["is_correct"]}
+            is_correct = bool(selected_ids) and selected_ids == correct_ids
+            if is_correct:
+                score += 1
+            rows_to_insert = []
+            if selected_ids:
+                for cid in selected_ids:
+                    choice = next((c for c in choices if str(c["id"]) == cid), None)
+                    if choice:
+                        rows_to_insert.append(
+                            {
+                                "choice_id": choice["id"],
+                                "text_answer": None,
+                                "is_correct": 1 if choice["is_correct"] else 0,
+                            }
+                        )
+            else:
+                rows_to_insert.append({"choice_id": None, "text_answer": None, "is_correct": 0})
+            graded.append(
+                {
+                    "question": question,
+                    "choices": choices,
+                    "selected_choice_ids": {int(cid) for cid in selected_ids if cid.isdigit()},
+                    "text_given": None,
+                    "question_correct": is_correct,
+                    "rows_to_insert": rows_to_insert,
+                }
+            )
+        else:  # single_choice
+            selected_choice_id = request.form.get(f"question_{question['id']}")
+            is_correct = False
+            choice_id = None
+            if selected_choice_id:
+                choice = db.execute(
+                    "SELECT * FROM quiz_choices WHERE id = ? AND question_id = ?",
+                    (selected_choice_id, question["id"]),
+                ).fetchone()
+                if choice:
+                    choice_id = choice["id"]
+                    is_correct = bool(choice["is_correct"])
+            if is_correct:
+                score += 1
+            graded.append(
+                {
+                    "question": question,
+                    "choices": choices,
+                    "selected_choice_ids": {choice_id} if choice_id else set(),
+                    "text_given": None,
+                    "question_correct": is_correct,
+                    "rows_to_insert": [
+                        {"choice_id": choice_id, "text_answer": None, "is_correct": 1 if is_correct else 0}
+                    ],
+                }
+            )
+
+    total = len(questions)
+    pct = round((score / total) * 100) if total else 0
+    passed = 1 if pct >= quiz["passing_score"] else 0
+
+    cur = db.execute(
+        """INSERT INTO quiz_attempts (quiz_id, employee_id, score, total, passed)
+           VALUES (?, ?, ?, ?, ?)""",
+        (quiz_id, session["user_id"], score, total, passed),
+    )
+    attempt_id = cur.lastrowid
+    for row in graded:
+        for insert_row in row["rows_to_insert"]:
+            db.execute(
+                """INSERT INTO quiz_attempt_answers (attempt_id, question_id, choice_id, text_answer, is_correct)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    attempt_id,
+                    row["question"]["id"],
+                    insert_row["choice_id"],
+                    insert_row["text_answer"],
+                    insert_row["is_correct"],
+                ),
+            )
+
+    if passed:
+        mark_quiz_step_complete(db, session["user_id"], quiz_id)
+
+    db.commit()
+
+    return render_template(
+        "quiz_result.html", quiz=quiz, score=score, total=total, pct=pct, passed=passed,
+        review_rows=graded,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Master onboarding checklist (baseline tasks every employee gets, regardless
+# of which job-specific onboarding template they're assigned)
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/settings/master-checklist", methods=["GET", "POST"])
+def master_checklist_settings():
+    resp = require_permission("manage_onboarding_checklists")
+    if resp:
+        return resp
+
+    db = get_db()
+
+    if request.method == "POST":
+        step_name = request.form.get("step_name", "").strip()
+        if not step_name:
+            flash("Please describe the task.", "error")
+            return redirect(url_for("master_checklist_settings"))
+
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM master_checklist_items"
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO master_checklist_items (step_name, sort_order) VALUES (?, ?)",
+            (step_name, max_order + 1),
+        )
+
+        # Broadcast to every current employee too, same as adding a
+        # signature-required document or an onboarding training module does —
+        # otherwise this would only ever affect employees added from now on.
+        employees = db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
+        for emp in employees:
+            already = db.execute(
+                """SELECT 1 FROM onboarding_steps
+                   WHERE employee_id = ? AND step_type = 'task' AND step_name = ?""",
+                (emp["id"], step_name),
+            ).fetchone()
+            if already:
+                continue
+            db.execute(
+                """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+                   VALUES (?, ?, 'task', NULL)""",
+                (emp["id"], step_name),
+            )
+
+        db.commit()
+        flash("Added to the master checklist and every employee's list.", "success")
+        return redirect(url_for("master_checklist_settings"))
+
+    items = db.execute("SELECT * FROM master_checklist_items ORDER BY sort_order, id").fetchall()
+    return render_template("master_checklist.html", items=items)
+
+
+@app.route("/admin/settings/master-checklist/<int:item_id>/edit", methods=["POST"])
+def edit_master_checklist_item(item_id):
+    resp = require_permission("manage_onboarding_checklists")
+    if resp:
+        return resp
+
+    db = get_db()
+    item = db.execute("SELECT * FROM master_checklist_items WHERE id = ?", (item_id,)).fetchone()
+    if item is None:
+        flash("Checklist item not found.", "error")
+        return redirect(url_for("master_checklist_settings"))
+
+    step_name = request.form.get("step_name", "").strip()
+    if not step_name:
+        flash("Please describe the task.", "error")
+        return redirect(url_for("master_checklist_settings"))
+
+    old_name = item["step_name"]
+    db.execute("UPDATE master_checklist_items SET step_name = ? WHERE id = ?", (step_name, item_id))
+    # Keep every employee's already-broadcast step in sync with the rename —
+    # delete matches on step_name, so this also keeps that working correctly.
+    db.execute(
+        "UPDATE onboarding_steps SET step_name = ? WHERE step_type = 'task' AND step_name = ?",
+        (step_name, old_name),
+    )
+    db.commit()
+    flash("Master checklist item updated (including on every employee's checklist).", "success")
+    return redirect(url_for("master_checklist_settings"))
+
+
+@app.route("/admin/settings/master-checklist/<int:item_id>/delete", methods=["POST"])
+def delete_master_checklist_item(item_id):
+    resp = require_permission("manage_onboarding_checklists")
+    if resp:
+        return resp
+
+    db = get_db()
+    item = db.execute("SELECT * FROM master_checklist_items WHERE id = ?", (item_id,)).fetchone()
+    if item is None:
+        flash("Checklist item not found.", "error")
+        return redirect(url_for("master_checklist_settings"))
+
+    db.execute("DELETE FROM master_checklist_items WHERE id = ?", (item_id,))
+    # Also pull this task off of everyone's checklist, completed or not —
+    # otherwise it lingers forever with no way to get rid of it.
+    db.execute(
+        "DELETE FROM onboarding_steps WHERE step_type = 'task' AND related_id IS NULL AND step_name = ?",
+        (item["step_name"],),
+    )
+    db.commit()
+    flash(f'"{item["step_name"]}" removed from the master checklist and every employee\'s list.', "success")
+    return redirect(url_for("master_checklist_settings"))
+
+
+# ---------------------------------------------------------------------------
 # Settings / onboarding checklist templates (job-specific onboarding)
 # ---------------------------------------------------------------------------
 
@@ -2383,6 +3351,7 @@ def onboarding_template_detail(template_id):
     ).fetchall()
     documents = db.execute("SELECT * FROM documents ORDER BY title").fetchall()
     modules = db.execute("SELECT * FROM training_modules ORDER BY title").fetchall()
+    quizzes = db.execute("SELECT * FROM quizzes ORDER BY title").fetchall()
     employees_using = db.execute(
         "SELECT * FROM employees WHERE onboarding_template_id = ? ORDER BY name", (template_id,)
     ).fetchall()
@@ -2393,6 +3362,7 @@ def onboarding_template_detail(template_id):
         items=items,
         documents=documents,
         modules=modules,
+        quizzes=quizzes,
         employees_using=employees_using,
     )
 
@@ -2497,6 +3467,40 @@ def add_template_training_item(template_id):
     )
     db.commit()
     flash("Training module added to checklist.", "success")
+    return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
+
+@app.route("/admin/settings/onboarding-templates/<int:template_id>/items/quiz", methods=["POST"])
+def add_template_quiz_item(template_id):
+    resp = require_permission("manage_onboarding_checklists")
+    if resp:
+        return resp
+
+    db = get_db()
+    template = db.execute(
+        "SELECT id FROM onboarding_templates WHERE id = ?", (template_id,)
+    ).fetchone()
+    if template is None:
+        flash("Onboarding checklist not found.", "error")
+        return redirect(url_for("onboarding_templates_list"))
+
+    quiz_id = request.form.get("quiz_id", "")
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Please choose a quiz.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
+    max_order = db.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM onboarding_template_items WHERE template_id = ?",
+        (template_id,),
+    ).fetchone()[0]
+    db.execute(
+        """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
+           VALUES (?, ?, 'quiz', ?, ?)""",
+        (template_id, f"Take Quiz: {quiz['title']}", quiz["id"], max_order + 1),
+    )
+    db.commit()
+    flash("Quiz added to checklist.", "success")
     return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
 

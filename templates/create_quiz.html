@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Create Quiz · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Create Quiz</h1>
+    <p class="page-subtitle">Build the whole quiz — settings and questions — before saving.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('admin_quizzes') }}">Back to Quizzes</a>
+</div>
+
+<form method="post" action="{{ url_for('create_quiz') }}">
+  <div class="card" style="max-width:640px;">
+    <h3>Quiz Settings</h3>
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" required>
+    </div>
+    <div class="form-group">
+      <label for="description">Description (optional)</label>
+      <textarea id="description" name="description" placeholder="What this quiz covers..."></textarea>
+    </div>
+    <div class="form-group">
+      <label for="training_module_id">Related training module (optional)</label>
+      <select id="training_module_id" name="training_module_id">
+        <option value="">None</option>
+        {% for mod in training_modules %}
+          <option value="{{ mod.id }}">{{ mod.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="passing_score">Passing score (%)</label>
+      <input type="number" id="passing_score" name="passing_score" min="0" max="100" value="70" style="max-width:120px;">
+    </div>
+    <div class="checkbox-row form-group">
+      <input type="checkbox" id="is_onboarding" name="is_onboarding">
+      <label for="is_onboarding">Required for every employee (adds to everyone's checklist immediately, and to every new hire going forward)</label>
+    </div>
+  </div>
+
+  <div id="questions-container"></div>
+
+  <div class="card" style="max-width:640px;">
+    <button type="button" id="add-question-btn" class="btn btn-secondary">+ Add Question</button>
+  </div>
+
+  <div class="card" style="max-width:640px;">
+    <button type="submit" class="btn btn-primary">Create Quiz</button>
+  </div>
+</form>
+
+<template id="question-template">
+<div class="card qblock qform" data-qname="q__IDX__">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 class="qblock-number">Question</h3>
+    <button type="button" class="btn btn-danger btn-small q-remove-question">Remove Question</button>
+  </div>
+  <input type="hidden" name="question_indices" value="__IDX__">
+  <div class="form-group">
+    <label>Question</label>
+    <input type="text" name="q__IDX__text" required>
+  </div>
+  <div class="form-group">
+    <label>Question Type</label>
+    <select name="q__IDX__type" class="q-type-select">
+      <option value="single_choice">Multiple choice (single answer)</option>
+      <option value="multi_choice">Multiple choice (multiple answers)</option>
+      <option value="text">Text answer</option>
+      <option value="matching">Matching</option>
+    </select>
+  </div>
+  <div class="q-choices">
+    <div class="q-choice-row checkbox-row form-group">
+      <input type="radio" name="q__IDX__correct_index" value="0" class="q-correct-radio" checked>
+      <input type="checkbox" name="q__IDX__correct_indices" value="0" class="q-correct-checkbox" style="display:none;">
+      <input type="text" name="q__IDX__choice_text" placeholder="Choice 1" class="q-choice-text" style="flex:1;">
+      <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+    </div>
+    <div class="q-choice-row checkbox-row form-group">
+      <input type="radio" name="q__IDX__correct_index" value="1" class="q-correct-radio">
+      <input type="checkbox" name="q__IDX__correct_indices" value="1" class="q-correct-checkbox" style="display:none;">
+      <input type="text" name="q__IDX__choice_text" placeholder="Choice 2" class="q-choice-text" style="flex:1;">
+      <button type="button" class="btn btn-secondary btn-small q-remove-choice">Remove</button>
+    </div>
+    <button type="button" class="btn btn-secondary btn-small q-add-choice">+ Add Choice</button>
+  </div>
+  <div class="q-text-answer form-group" style="display:none;">
+    <label>Correct answer (exact match, not case-sensitive)</label>
+    <input type="text" name="q__IDX__text_answer">
+  </div>
+  <div class="q-matching form-group" style="display:none;">
+    <label>Prompt / correct match pairs</label>
+    <p class="form-hint">Employees see the prompts with the matches shuffled and pick the right one for each.</p>
+    <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+      <input type="text" name="q__IDX__prompt_text" placeholder="Prompt 1" style="flex:1;">
+      <input type="text" name="q__IDX__match_text" placeholder="Correct match 1" style="flex:1;">
+      <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+    </div>
+    <div class="q-pair-row" style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+      <input type="text" name="q__IDX__prompt_text" placeholder="Prompt 2" style="flex:1;">
+      <input type="text" name="q__IDX__match_text" placeholder="Correct match 2" style="flex:1;">
+      <button type="button" class="btn btn-secondary btn-small q-remove-pair">Remove</button>
+    </div>
+    <button type="button" class="btn btn-secondary btn-small q-add-pair">+ Add Pair</button>
+  </div>
+</div>
+</template>
+
+<script src="{{ url_for('static', filename='quiz_builder.js') }}"></script>
+{% endblock %}

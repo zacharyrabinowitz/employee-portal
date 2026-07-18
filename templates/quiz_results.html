@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ quiz.title }} Results · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ quiz.title }}</h1>
+    <p class="page-subtitle">Results · Passing score {{ quiz.passing_score }}%</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('quiz_detail_admin', quiz_id=quiz.id) }}">Back to Quiz</a>
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>Attempts ({{ attempts|length }})</h3>
+    {% for attempt in attempts %}
+      <div class="list-item">
+        <div class="list-item-info">
+          <strong>{{ attempt.employee_name }}</strong>
+          <span>{{ attempt.score }}/{{ attempt.total }} on {{ attempt.submitted_at }}</span>
+        </div>
+        {% if attempt.passed %}
+          <span class="badge badge-success">Passed</span>
+        {% else %}
+          <span class="badge badge-warning">Failed</span>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="empty-state">No one has taken this quiz yet.</p>
+    {% endfor %}
+  </div>
+
+  <div class="card">
+    <h3>Not Yet Attempted ({{ not_attempted|length }})</h3>
+    {% for emp in not_attempted %}
+      <div class="list-item">
+        <div class="list-item-info">
+          <strong>{{ emp.name }}</strong>
+          <span>{{ emp.email }}</span>
+        </div>
+      </div>
+    {% else %}
+      <p class="empty-state">Everyone has taken this quiz.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

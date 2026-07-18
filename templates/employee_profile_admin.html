@@ -57,15 +57,22 @@
         <h3>Onboarding Progress</h3>
         <div class="progress-label"><span>{{ onboarding_pct }}% complete</span></div>
         <div class="progress-track"><div class="progress-fill" style="width:{{ onboarding_pct }}%;"></div></div>
-        <ul style="padding-left:1.1rem; margin-top:1rem;">
+        <ul style="padding-left:1.1rem; margin-top:1rem; list-style:none; margin-left:-1.1rem;">
           {% for step in steps %}
-          <li>
-            {% if step.completed_at %}
-              <span class="badge badge-success">Done</span>
-            {% else %}
-              <span class="badge badge-muted">Pending</span>
+          <li style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; padding:0.3rem 0;">
+            <span>
+              {% if step.completed_at %}
+                <span class="badge badge-success">Done</span>
+              {% else %}
+                <span class="badge badge-muted">Pending</span>
+              {% endif %}
+              {{ step.step_name }}
+            </span>
+            {% if can('manage_employees') %}
+            <form method="post" action="{{ url_for('delete_employee_onboarding_step', step_id=step.id) }}" onsubmit="return confirm('Remove this step from {{ employee.name }}\'s checklist?');">
+              <button type="submit" class="btn btn-danger btn-small">Remove</button>
+            </form>
             {% endif %}
-            {{ step.step_name }}
           </li>
           {% else %}
           <li class="empty-state">No onboarding steps.</li>

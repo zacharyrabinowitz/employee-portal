@@ -15,6 +15,12 @@
     <p class="form-hint">Build custom onboarding checklists for different jobs — bundle documents, training modules, and tasks together, then assign the checklist when you add a new employee.</p>
     <a class="btn btn-primary btn-small" href="{{ url_for('onboarding_templates_list') }}">Manage Onboarding Checklists</a>
   </div>
+
+  <div class="card">
+    <h3>Master Checklist</h3>
+    <p class="form-hint">Manage the baseline tasks that get added to every employee's checklist automatically, no matter which job-specific checklist they're on.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('master_checklist_settings') }}">Manage Master Checklist</a>
+  </div>
   {% endif %}
 
   {% if can('manage_settings') %}
