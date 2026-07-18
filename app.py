@@ -2500,6 +2500,38 @@ def add_template_training_item(template_id):
     return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
 
+@app.route("/admin/settings/onboarding-templates/items/<int:item_id>/edit", methods=["POST"])
+def edit_template_task_item(item_id):
+    resp = require_permission("manage_onboarding_checklists")
+    if resp:
+        return resp
+
+    db = get_db()
+    item = db.execute(
+        "SELECT * FROM onboarding_template_items WHERE id = ?", (item_id,)
+    ).fetchone()
+    if item is None:
+        flash("Item not found.", "error")
+        return redirect(url_for("onboarding_templates_list"))
+
+    if item["step_type"] != "task":
+        flash("Only tasks can be edited. Remove and re-add documents or training instead.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=item["template_id"]))
+
+    step_name = request.form.get("step_name", "").strip()
+    if not step_name:
+        flash("Please describe the task.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=item["template_id"]))
+
+    db.execute(
+        "UPDATE onboarding_template_items SET step_name = ? WHERE id = ?",
+        (step_name, item_id),
+    )
+    db.commit()
+    flash("Task updated.", "success")
+    return redirect(url_for("onboarding_template_detail", template_id=item["template_id"]))
+
+
 @app.route("/admin/settings/onboarding-templates/items/<int:item_id>/delete", methods=["POST"])
 def delete_template_item(item_id):
     resp = require_permission("manage_onboarding_checklists")
