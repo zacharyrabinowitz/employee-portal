@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Team Member Training{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
 </head>
 <body>
   {% if session.get('user_id') %}
   <nav class="navbar">
-    <div class="navbar-brand">Team Member Training</div>
+    <div class="navbar-brand">
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="The Draft Room" class="navbar-logo">
+      Team Member Training
+    </div>
     <div class="navbar-links">
       {% set role = session.get('role') %}
       {% set path = request.path %}
