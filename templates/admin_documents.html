@@ -25,9 +25,17 @@
       <label for="content">Notes (optional)</label>
       <textarea id="content" name="content" placeholder="Any additional instructions to show alongside the file..."></textarea>
     </div>
-    <div class="checkbox-row form-group">
-      <input type="checkbox" id="requires_signature" name="requires_signature" checked>
-      <label for="requires_signature">Requires employee signature</label>
+    <div class="form-group">
+      <label>What should employees do with this document?</label>
+      <div class="checkbox-row">
+        <input type="radio" id="type_sign" name="document_type" value="sign" checked>
+        <label for="type_sign">Read and sign this document</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="radio" id="type_upload" name="document_type" value="upload">
+        <label for="type_upload">Upload their own copy of this document</label>
+      </div>
+      <p class="form-hint">"Upload" requests (e.g. Driver's License, ID) are added to every employee's checklist and let them attach their own file — they won't be asked to sign anything.</p>
     </div>
     <button type="submit" class="btn btn-primary">Create Document</button>
   </form>
@@ -39,10 +47,18 @@
   {% for row in doc_rows %}
     <div class="list-item">
       <div class="list-item-info">
-        <strong>{{ row.document.title }} {% if row.document.file_path %}<span class="badge badge-muted">File attached</span>{% endif %}</strong>
+        <strong>
+          {{ row.document.title }}
+          {% if row.document.file_path %}<span class="badge badge-muted">File attached</span>{% endif %}
+          {% if row.document.requires_upload %}<span class="badge badge-muted">Upload required</span>{% endif %}
+        </strong>
         <span>
-          {% if row.document.requires_signature %}Requires signature ·{% endif %}
-          {{ row.signed_count }} signature(s) on file · Created {{ row.document.created_at }}
+          {% if row.document.requires_upload %}
+            {{ row.signed_count }} upload(s) received · Created {{ row.document.created_at }}
+          {% else %}
+            {% if row.document.requires_signature %}Requires signature ·{% endif %}
+            {{ row.signed_count }} signature(s) on file · Created {{ row.document.created_at }}
+          {% endif %}
         </span>
       </div>
       <div class="btn-row">

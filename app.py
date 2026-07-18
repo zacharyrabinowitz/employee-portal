@@ -1229,10 +1229,18 @@ def admin_documents():
     documents = db.execute("SELECT * FROM documents ORDER BY created_at DESC").fetchall()
     doc_rows = []
     for doc in documents:
-        signed_count = db.execute(
-            "SELECT COUNT(*) FROM signatures WHERE document_id = ?", (doc["id"],)
-        ).fetchone()[0]
-        doc_rows.append({"document": doc, "signed_count": signed_count})
+        if doc["requires_upload"]:
+            uploaded_count = db.execute(
+                """SELECT COUNT(*) FROM onboarding_steps
+                   WHERE step_type = 'upload' AND related_id = ? AND completed_at IS NOT NULL""",
+                (doc["id"],),
+            ).fetchone()[0]
+            doc_rows.append({"document": doc, "signed_count": uploaded_count})
+        else:
+            signed_count = db.execute(
+                "SELECT COUNT(*) FROM signatures WHERE document_id = ?", (doc["id"],)
+            ).fetchone()[0]
+            doc_rows.append({"document": doc, "signed_count": signed_count})
 
     return render_template("admin_documents.html", doc_rows=doc_rows)
 
@@ -1248,6 +1256,27 @@ def document_audit(document_id):
     if document is None:
         flash("Document not found.", "error")
         return redirect(url_for("admin_documents"))
+
+    if document["requires_upload"]:
+        uploaded = db.execute(
+            """SELECT employee_uploads.*, employees.name AS employee_name
+               FROM employee_uploads
+               JOIN onboarding_steps ON onboarding_steps.id = employee_uploads.onboarding_step_id
+               JOIN employees ON employees.id = employee_uploads.employee_id
+               WHERE onboarding_steps.step_type = 'upload' AND onboarding_steps.related_id = ?
+               ORDER BY employee_uploads.uploaded_at DESC""",
+            (document_id,),
+        ).fetchall()
+        not_uploaded = db.execute(
+            """SELECT * FROM employees WHERE role = 'Employee' AND id NOT IN (
+                 SELECT employee_id FROM onboarding_steps
+                 WHERE step_type = 'upload' AND related_id = ? AND completed_at IS NOT NULL
+               )""",
+            (document_id,),
+        ).fetchall()
+        return render_template(
+            "document_audit.html", document=document, uploaded=uploaded, not_uploaded=not_uploaded
+        )
 
     signed = db.execute(
         """SELECT signatures.*, employees.name AS employee_name
@@ -1286,12 +1315,39 @@ def delete_document(document_id):
         except OSError:
             pass
 
+    uploads = db.execute(
+        """SELECT employee_uploads.id, employee_uploads.file_path
+           FROM employee_uploads
+           JOIN onboarding_steps ON onboarding_steps.id = employee_uploads.onboarding_step_id
+           WHERE onboarding_steps.step_type = 'upload' AND onboarding_steps.related_id = ?""",
+        (document_id,),
+    ).fetchall()
+    for upload in uploads:
+        try:
+            os.remove(os.path.join(EMPLOYEE_UPLOAD_FOLDER, upload["file_path"]))
+        except OSError:
+            pass
+    db.execute(
+        """DELETE FROM employee_uploads WHERE onboarding_step_id IN (
+             SELECT id FROM onboarding_steps WHERE step_type = 'upload' AND related_id = ?
+           )""",
+        (document_id,),
+    )
+
     db.execute(
         "DELETE FROM onboarding_steps WHERE step_type = 'document' AND related_id = ?",
         (document_id,),
     )
     db.execute(
         "DELETE FROM onboarding_template_items WHERE step_type = 'document' AND related_id = ?",
+        (document_id,),
+    )
+    db.execute(
+        "DELETE FROM onboarding_steps WHERE step_type = 'upload' AND related_id = ?",
+        (document_id,),
+    )
+    db.execute(
+        "DELETE FROM onboarding_template_items WHERE step_type = 'upload' AND related_id = ?",
         (document_id,),
     )
     db.execute("DELETE FROM signatures WHERE document_id = ?", (document_id,))
@@ -2398,10 +2454,12 @@ def add_template_document_item(template_id):
         "SELECT COALESCE(MAX(sort_order), -1) FROM onboarding_template_items WHERE template_id = ?",
         (template_id,),
     ).fetchone()[0]
+    step_type = "upload" if document["requires_upload"] else "document"
+    verb = "Upload" if document["requires_upload"] else "Sign"
     db.execute(
         """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
-           VALUES (?, ?, 'document', ?, ?)""",
-        (template_id, f"Sign {document['title']}", document["id"], max_order + 1),
+           VALUES (?, ?, ?, ?, ?)""",
+        (template_id, f"{verb} {document['title']}", step_type, document["id"], max_order + 1),
     )
     db.commit()
     flash("Document added to checklist.", "success")
