@@ -1,9 +1,15 @@
+import io
+import json
 import os
 import re
 import secrets
 import shutil
 import sqlite3
+import tempfile
+import zipfile
 from datetime import datetime
+
+import migrate as db_migrate
 
 from flask import (
     Flask,
@@ -14,6 +20,7 @@ from flask import (
     session,
     url_for,
     flash,
+    send_file,
     send_from_directory,
 )
 
@@ -28,9 +35,11 @@ TRAINING_SLIDES_FOLDER = os.path.join(
 ALLOWED_EXTENSIONS = {"pdf", "doc", "docx", "txt", "png", "jpg", "jpeg"}
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
+UPLOADS_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+
 app = Flask(__name__)
 app.secret_key = "dev-secret-key-change-me"
-app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB (backup imports can be large)
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(EMPLOYEE_UPLOAD_FOLDER, exist_ok=True)
@@ -2409,6 +2418,165 @@ def update_module_checklists(module_id):
     db.commit()
     flash("Onboarding checklist membership updated.", "success")
     return redirect(url_for("training_detail_admin", module_id=module_id) + "#onboarding")
+
+
+# ---------------------------------------------------------------------------
+# Full data export / import (backup and restore)
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/settings/export")
+def export_data():
+    resp = require_admin()
+    if resp:
+        return resp
+
+    # Consistent snapshot of the live database via SQLite's own backup API,
+    # rather than copying the file directly (safe even mid-write).
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+        tmp_path = tmp.name
+    src = dst = None
+    try:
+        src = sqlite3.connect(DB_PATH)
+        dst = sqlite3.connect(tmp_path)
+        src.backup(dst)
+    finally:
+        if dst is not None:
+            dst.close()
+        if src is not None:
+            src.close()
+
+    try:
+        with open(tmp_path, "rb") as f:
+            db_bytes = f.read()
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("portal.db", db_bytes)
+        zf.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "app": "employee-portal",
+                    "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+                    "exported_by": session.get("name"),
+                },
+                indent=2,
+            ),
+        )
+        if os.path.isdir(UPLOADS_ROOT):
+            for root, _dirs, files in os.walk(UPLOADS_ROOT):
+                for fname in files:
+                    full_path = os.path.join(root, fname)
+                    arcname = os.path.join("uploads", os.path.relpath(full_path, UPLOADS_ROOT))
+                    zf.write(full_path, arcname)
+    buffer.seek(0)
+
+    filename = f"employee-portal-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+    return send_file(
+        buffer, mimetype="application/zip", as_attachment=True, download_name=filename
+    )
+
+
+@app.route("/admin/settings/import", methods=["GET", "POST"])
+def import_data():
+    resp = require_admin()
+    if resp:
+        return resp
+
+    if request.method == "POST":
+        confirm = request.form.get("confirm", "").strip().lower()
+        if confirm != "restore":
+            flash('You must type "restore" to confirm.', "error")
+            return render_template("import_data.html")
+
+        file = request.files.get("backup_file")
+        if not file or not file.filename or not file.filename.lower().endswith(".zip"):
+            flash("Please choose a .zip backup file to restore.", "error")
+            return render_template("import_data.html")
+
+        try:
+            zf = zipfile.ZipFile(file.stream)
+        except zipfile.BadZipFile:
+            flash("That file isn't a valid backup zip.", "error")
+            return render_template("import_data.html")
+
+        if "portal.db" not in zf.namelist():
+            flash(
+                "That zip doesn't contain a portal.db — it doesn't look like a backup from this app.",
+                "error",
+            )
+            return render_template("import_data.html")
+
+        # Extract the DB into a temp file and sanity-check it before touching anything live.
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            tmp_path = tmp.name
+            tmp.write(zf.read("portal.db"))
+
+        valid = False
+        check_conn = None
+        try:
+            check_conn = sqlite3.connect(tmp_path)
+            valid = (
+                check_conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'employees'"
+                ).fetchone()
+                is not None
+            )
+        except sqlite3.DatabaseError:
+            valid = False
+        finally:
+            if check_conn is not None:
+                check_conn.close()
+
+        if not valid:
+            os.remove(tmp_path)
+            flash(
+                "That backup's database looks corrupt or isn't an employee-portal backup.", "error"
+            )
+            return render_template("import_data.html")
+
+        # Release our own connection to the live DB before swapping the file out from under it.
+        db = g.pop("db", None)
+        if db is not None:
+            db.close()
+
+        shutil.copyfile(tmp_path, DB_PATH)
+        os.remove(tmp_path)
+
+        # Bring an older backup's schema up to date with what this version of the app expects.
+        db_migrate.migrate()
+
+        # Replace uploaded files with exactly what's in the backup.
+        if os.path.isdir(UPLOADS_ROOT):
+            shutil.rmtree(UPLOADS_ROOT)
+        os.makedirs(UPLOADS_ROOT, exist_ok=True)
+
+        uploads_root_normalized = os.path.normpath(UPLOADS_ROOT) + os.sep
+        for member in zf.namelist():
+            if not member.startswith("uploads/") or member.endswith("/"):
+                continue
+            relative = member[len("uploads/") :]
+            target = os.path.normpath(os.path.join(UPLOADS_ROOT, relative))
+            if not target.startswith(uploads_root_normalized):
+                continue  # zip-slip guard: skip anything that would escape the uploads folder
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with zf.open(member) as src_f, open(target, "wb") as dst_f:
+                shutil.copyfileobj(src_f, dst_f)
+
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        os.makedirs(EMPLOYEE_UPLOAD_FOLDER, exist_ok=True)
+        os.makedirs(TRAINING_SLIDES_FOLDER, exist_ok=True)
+
+        session.clear()
+        flash("Backup restored. Please log in again.", "success")
+        return redirect(url_for("login"))
+
+    return render_template("import_data.html")
 
 
 if __name__ == "__main__":

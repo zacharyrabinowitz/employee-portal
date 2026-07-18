@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Restore from Backup · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Restore from Backup</h1>
+    <p class="page-subtitle">Replace all current data with the contents of a backup file.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card confirm-box" style="max-width:560px;">
+  <p>This replaces <strong>everything</strong> — every employee, document, training module, slide, and setting — with what's in the backup file. Anything added or changed since that backup was taken will be lost. This cannot be undone.</p>
+  <p>Take a fresh export first if you're not sure the backup you're restoring is up to date.</p>
+
+  <form method="post" action="{{ url_for('import_data') }}" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="backup_file">Backup file (.zip)</label>
+      <input type="file" id="backup_file" name="backup_file" accept=".zip" required>
+    </div>
+    <div class="form-group">
+      <label for="confirm">Type "restore" to confirm</label>
+      <input type="text" id="confirm" name="confirm" placeholder="restore" required style="max-width:220px;">
+    </div>
+    <button type="submit" class="btn btn-danger">Restore from Backup</button>
+  </form>
+</div>
+{% endblock %}
