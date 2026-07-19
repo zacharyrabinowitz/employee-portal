@@ -50,18 +50,18 @@
   </div>
 
   <div class="card">
-    <h3>Add a Document</h3>
+    <h3>Add Documents</h3>
     {% if documents %}
     <form method="post" action="{{ url_for('add_template_document_item', template_id=template.id) }}">
-      <div class="form-group">
-        <label for="document_id">Document</label>
-        <select id="document_id" name="document_id" required>
-          {% for doc in documents %}
-            <option value="{{ doc.id }}">{{ doc.title }}</option>
-          {% endfor %}
-        </select>
+      <div class="form-group" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:0.5rem 0.75rem;">
+        {% for doc in documents %}
+          <div class="checkbox-row" style="padding:0.2rem 0;">
+            <input type="checkbox" name="document_ids" value="{{ doc.id }}" id="doc_{{ doc.id }}">
+            <label for="doc_{{ doc.id }}" style="margin:0; font-weight:400;">{{ doc.title }}</label>
+          </div>
+        {% endfor %}
       </div>
-      <button type="submit" class="btn btn-secondary btn-small">Add Document</button>
+      <button type="submit" class="btn btn-secondary btn-small">Save</button>
     </form>
     {% else %}
       <p class="empty-state">No documents exist yet. <a href="{{ url_for('admin_documents') }}">Create one first.</a></p>
@@ -69,18 +69,18 @@
   </div>
 
   <div class="card">
-    <h3>Add a Training Module</h3>
+    <h3>Add Training Modules</h3>
     {% if modules %}
     <form method="post" action="{{ url_for('add_template_training_item', template_id=template.id) }}">
-      <div class="form-group">
-        <label for="module_id">Training Module</label>
-        <select id="module_id" name="module_id" required>
-          {% for mod in modules %}
-            <option value="{{ mod.id }}">{{ mod.title }}</option>
-          {% endfor %}
-        </select>
+      <div class="form-group" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:0.5rem 0.75rem;">
+        {% for mod in modules %}
+          <div class="checkbox-row" style="padding:0.2rem 0;">
+            <input type="checkbox" name="module_ids" value="{{ mod.id }}" id="mod_{{ mod.id }}">
+            <label for="mod_{{ mod.id }}" style="margin:0; font-weight:400;">{{ mod.title }}</label>
+          </div>
+        {% endfor %}
       </div>
-      <button type="submit" class="btn btn-secondary btn-small">Add Training Module</button>
+      <button type="submit" class="btn btn-secondary btn-small">Save</button>
     </form>
     {% else %}
       <p class="empty-state">No training modules exist yet. <a href="{{ url_for('add_training_module') }}">Create one first.</a></p>
@@ -88,18 +88,18 @@
   </div>
 
   <div class="card">
-    <h3>Add a Quiz</h3>
+    <h3>Add Quizzes</h3>
     {% if quizzes %}
     <form method="post" action="{{ url_for('add_template_quiz_item', template_id=template.id) }}">
-      <div class="form-group">
-        <label for="quiz_id">Quiz</label>
-        <select id="quiz_id" name="quiz_id" required>
-          {% for quiz in quizzes %}
-            <option value="{{ quiz.id }}">{{ quiz.title }}</option>
-          {% endfor %}
-        </select>
+      <div class="form-group" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:0.5rem 0.75rem;">
+        {% for quiz in quizzes %}
+          <div class="checkbox-row" style="padding:0.2rem 0;">
+            <input type="checkbox" name="quiz_ids" value="{{ quiz.id }}" id="quiz_{{ quiz.id }}">
+            <label for="quiz_{{ quiz.id }}" style="margin:0; font-weight:400;">{{ quiz.title }}</label>
+          </div>
+        {% endfor %}
       </div>
-      <button type="submit" class="btn btn-secondary btn-small">Add Quiz</button>
+      <button type="submit" class="btn btn-secondary btn-small">Save</button>
     </form>
     {% else %}
       <p class="empty-state">No quizzes exist yet. <a href="{{ url_for('create_quiz') }}">Create one first.</a></p>

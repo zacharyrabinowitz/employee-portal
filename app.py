@@ -2875,6 +2875,83 @@ def quiz_results(quiz_id):
     )
 
 
+@app.route("/admin/quizzes/attempts/<int:attempt_id>")
+def quiz_attempt_detail(attempt_id):
+    resp = require_permission("manage_quizzes")
+    if resp:
+        return resp
+
+    db = get_db()
+    attempt = db.execute(
+        """SELECT quiz_attempts.*, employees.name AS employee_name
+           FROM quiz_attempts JOIN employees ON employees.id = quiz_attempts.employee_id
+           WHERE quiz_attempts.id = ?""",
+        (attempt_id,),
+    ).fetchone()
+    if attempt is None:
+        flash("Attempt not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (attempt["quiz_id"],)).fetchone()
+    questions = db.execute(
+        "SELECT * FROM quiz_questions WHERE quiz_id = ? ORDER BY sort_order, id", (quiz["id"],)
+    ).fetchall()
+
+    review_rows = []
+    for question in questions:
+        choices = db.execute(
+            "SELECT * FROM quiz_choices WHERE question_id = ? ORDER BY sort_order, id",
+            (question["id"],),
+        ).fetchall()
+        answers = db.execute(
+            "SELECT * FROM quiz_attempt_answers WHERE attempt_id = ? AND question_id = ?",
+            (attempt_id, question["id"]),
+        ).fetchall()
+        qtype = question["question_type"]
+
+        if qtype == "text":
+            text_given = answers[0]["text_answer"] if answers else ""
+            question_correct = bool(answers) and bool(answers[0]["is_correct"])
+            row = {
+                "question": question, "choices": choices, "selected_choice_ids": set(),
+                "text_given": text_given, "question_correct": question_correct,
+                "matching_selections": {},
+            }
+        elif qtype == "matching":
+            selections = {a["choice_id"]: a["text_answer"] for a in answers if a["choice_id"] is not None}
+            question_correct = bool(choices) and all(
+                selections.get(c["id"]) == c["match_text"] for c in choices
+            )
+            row = {
+                "question": question, "choices": choices, "selected_choice_ids": set(),
+                "text_given": None, "question_correct": question_correct,
+                "matching_selections": selections,
+            }
+        elif qtype == "multi_choice":
+            selected_ids = {a["choice_id"] for a in answers if a["choice_id"] is not None}
+            correct_ids = {c["id"] for c in choices if c["is_correct"]}
+            question_correct = bool(selected_ids) and selected_ids == correct_ids
+            row = {
+                "question": question, "choices": choices, "selected_choice_ids": selected_ids,
+                "text_given": None, "question_correct": question_correct,
+                "matching_selections": {},
+            }
+        else:  # single_choice
+            selected_ids = {a["choice_id"] for a in answers if a["choice_id"] is not None}
+            question_correct = bool(answers) and bool(answers[0]["is_correct"])
+            row = {
+                "question": question, "choices": choices, "selected_choice_ids": selected_ids,
+                "text_given": None, "question_correct": question_correct,
+                "matching_selections": {},
+            }
+
+        review_rows.append(row)
+
+    return render_template(
+        "quiz_attempt_detail.html", quiz=quiz, attempt=attempt, review_rows=review_rows
+    )
+
+
 @app.route("/employee/quizzes")
 def employee_quizzes():
     resp = require_login()
@@ -3414,25 +3491,46 @@ def add_template_document_item(template_id):
         flash("Onboarding checklist not found.", "error")
         return redirect(url_for("onboarding_templates_list"))
 
-    document_id = request.form.get("document_id", "")
-    document = db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
-    if document is None:
-        flash("Please choose a document.", "error")
+    document_ids = request.form.getlist("document_ids")
+    if not document_ids:
+        flash("Please choose at least one document.", "error")
         return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
+    existing = {
+        row["related_id"]
+        for row in db.execute(
+            """SELECT related_id FROM onboarding_template_items
+               WHERE template_id = ? AND step_type IN ('document', 'upload')""",
+            (template_id,),
+        ).fetchall()
+    }
     max_order = db.execute(
         "SELECT COALESCE(MAX(sort_order), -1) FROM onboarding_template_items WHERE template_id = ?",
         (template_id,),
     ).fetchone()[0]
-    step_type = "upload" if document["requires_upload"] else "document"
-    verb = "Upload" if document["requires_upload"] else "Sign"
-    db.execute(
-        """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
-           VALUES (?, ?, ?, ?, ?)""",
-        (template_id, f"{verb} {document['title']}", step_type, document["id"], max_order + 1),
-    )
+
+    added = 0
+    for document_id in document_ids:
+        document = db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
+        if document is None or document["id"] in existing:
+            continue
+        step_type = "upload" if document["requires_upload"] else "document"
+        verb = "Upload" if document["requires_upload"] else "Sign"
+        max_order += 1
+        db.execute(
+            """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
+               VALUES (?, ?, ?, ?, ?)""",
+            (template_id, f"{verb} {document['title']}", step_type, document["id"], max_order),
+        )
+        existing.add(document["id"])
+        added += 1
+
+    if added == 0:
+        flash("Those documents are already on this checklist.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
     db.commit()
-    flash("Document added to checklist.", "success")
+    flash(f"{added} document(s) added to checklist.", "success")
     return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
 
@@ -3450,23 +3548,44 @@ def add_template_training_item(template_id):
         flash("Onboarding checklist not found.", "error")
         return redirect(url_for("onboarding_templates_list"))
 
-    module_id = request.form.get("module_id", "")
-    module = db.execute("SELECT * FROM training_modules WHERE id = ?", (module_id,)).fetchone()
-    if module is None:
-        flash("Please choose a training module.", "error")
+    module_ids = request.form.getlist("module_ids")
+    if not module_ids:
+        flash("Please choose at least one training module.", "error")
         return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
+    existing = {
+        row["related_id"]
+        for row in db.execute(
+            """SELECT related_id FROM onboarding_template_items
+               WHERE template_id = ? AND step_type = 'training'""",
+            (template_id,),
+        ).fetchall()
+    }
     max_order = db.execute(
         "SELECT COALESCE(MAX(sort_order), -1) FROM onboarding_template_items WHERE template_id = ?",
         (template_id,),
     ).fetchone()[0]
-    db.execute(
-        """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
-           VALUES (?, ?, 'training', ?, ?)""",
-        (template_id, f"Complete {module['title']}", module["id"], max_order + 1),
-    )
+
+    added = 0
+    for module_id in module_ids:
+        module = db.execute("SELECT * FROM training_modules WHERE id = ?", (module_id,)).fetchone()
+        if module is None or module["id"] in existing:
+            continue
+        max_order += 1
+        db.execute(
+            """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
+               VALUES (?, ?, 'training', ?, ?)""",
+            (template_id, f"Complete {module['title']}", module["id"], max_order),
+        )
+        existing.add(module["id"])
+        added += 1
+
+    if added == 0:
+        flash("Those training modules are already on this checklist.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
     db.commit()
-    flash("Training module added to checklist.", "success")
+    flash(f"{added} training module(s) added to checklist.", "success")
     return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
 
@@ -3484,23 +3603,44 @@ def add_template_quiz_item(template_id):
         flash("Onboarding checklist not found.", "error")
         return redirect(url_for("onboarding_templates_list"))
 
-    quiz_id = request.form.get("quiz_id", "")
-    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
-    if quiz is None:
-        flash("Please choose a quiz.", "error")
+    quiz_ids = request.form.getlist("quiz_ids")
+    if not quiz_ids:
+        flash("Please choose at least one quiz.", "error")
         return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
+    existing = {
+        row["related_id"]
+        for row in db.execute(
+            """SELECT related_id FROM onboarding_template_items
+               WHERE template_id = ? AND step_type = 'quiz'""",
+            (template_id,),
+        ).fetchall()
+    }
     max_order = db.execute(
         "SELECT COALESCE(MAX(sort_order), -1) FROM onboarding_template_items WHERE template_id = ?",
         (template_id,),
     ).fetchone()[0]
-    db.execute(
-        """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
-           VALUES (?, ?, 'quiz', ?, ?)""",
-        (template_id, f"Take Quiz: {quiz['title']}", quiz["id"], max_order + 1),
-    )
+
+    added = 0
+    for quiz_id in quiz_ids:
+        quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+        if quiz is None or quiz["id"] in existing:
+            continue
+        max_order += 1
+        db.execute(
+            """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
+               VALUES (?, ?, 'quiz', ?, ?)""",
+            (template_id, f"Take Quiz: {quiz['title']}", quiz["id"], max_order),
+        )
+        existing.add(quiz["id"])
+        added += 1
+
+    if added == 0:
+        flash("Those quizzes are already on this checklist.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
     db.commit()
-    flash("Quiz added to checklist.", "success")
+    flash(f"{added} quiz(zes) added to checklist.", "success")
     return redirect(url_for("onboarding_template_detail", template_id=template_id))
 
 

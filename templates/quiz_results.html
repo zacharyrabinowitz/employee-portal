@@ -13,7 +13,7 @@
   <div class="card">
     <h3>Attempts ({{ attempts|length }})</h3>
     {% for attempt in attempts %}
-      <div class="list-item">
+      <a class="list-item" href="{{ url_for('quiz_attempt_detail', attempt_id=attempt.id) }}" style="text-decoration:none; color:inherit; cursor:pointer;">
         <div class="list-item-info">
           <strong>{{ attempt.employee_name }}</strong>
           <span>{{ attempt.score }}/{{ attempt.total }} on {{ attempt.submitted_at }}</span>
@@ -23,7 +23,7 @@
         {% else %}
           <span class="badge badge-warning">Failed</span>
         {% endif %}
-      </div>
+      </a>
     {% else %}
       <p class="empty-state">No one has taken this quiz yet.</p>
     {% endfor %}
