@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS custom_roles;
+DROP TABLE IF EXISTS quiz_locks;
+DROP TABLE IF EXISTS audit_log;
 DROP TABLE IF EXISTS master_checklist_items;
 DROP TABLE IF EXISTS quiz_attempt_answers;
 DROP TABLE IF EXISTS quiz_attempts;
@@ -171,6 +174,7 @@ CREATE TABLE quizzes (
     training_module_id INTEGER REFERENCES training_modules(id),
     passing_score INTEGER NOT NULL DEFAULT 70,
     is_onboarding INTEGER NOT NULL DEFAULT 0,
+    is_locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -216,5 +220,40 @@ CREATE TABLE master_checklist_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     step_name TEXT NOT NULL,
     sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    actor_id INTEGER,
+    actor_name TEXT,
+    actor_role TEXT,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    endpoint TEXT,
+    action_label TEXT,
+    action_type TEXT NOT NULL,
+    status_code INTEGER,
+    entity_summary TEXT,
+    details TEXT
+);
+
+CREATE INDEX idx_audit_log_created_at ON audit_log(created_at);
+CREATE INDEX idx_audit_log_actor_id ON audit_log(actor_id);
+CREATE INDEX idx_audit_log_action_type ON audit_log(action_type);
+
+CREATE TABLE quiz_locks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quiz_id INTEGER NOT NULL REFERENCES quizzes(id),
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    locked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(quiz_id, employee_id)
+);
+
+CREATE TABLE custom_roles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

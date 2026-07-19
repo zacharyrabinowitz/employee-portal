@@ -30,6 +30,28 @@
   {% endif %}
 </div>
 
+{% if can('documents_edit') %}
+<div class="card" style="max-width:640px;">
+  <h3>Edit Document</h3>
+  <form method="post" action="{{ url_for('edit_document', document_id=document.id) }}" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" value="{{ document.title }}" required>
+    </div>
+    <div class="form-group">
+      <label for="content">Notes</label>
+      <textarea id="content" name="content">{{ document.content or '' }}</textarea>
+    </div>
+    <div class="form-group">
+      <label for="document_file">Replace attached file (optional)</label>
+      <input type="file" id="document_file" name="document_file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg">
+      <p class="form-hint">Leave blank to keep the current file. Uploading a new one replaces it.</p>
+    </div>
+    <button type="submit" class="btn btn-secondary">Save Changes</button>
+  </form>
+</div>
+{% endif %}
+
 {% if document.requires_upload %}
 <div class="card-grid">
   <div class="card">
@@ -73,6 +95,11 @@
           <strong>{{ sig.employee_name }}</strong>
           <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }} from {{ sig.session_marker }}</span>
         </div>
+        {% if can('documents_signatures') %}
+        <form method="post" action="{{ url_for('delete_signature', signature_id=sig.id) }}" onsubmit="return confirm('Remove this signature? Their checklist step will become pending again.');">
+          <button type="submit" class="btn btn-danger btn-small">Remove</button>
+        </form>
+        {% endif %}
       </div>
     {% else %}
       <p class="empty-state">No one has signed yet.</p>
@@ -95,7 +122,7 @@
 </div>
 {% endif %}
 
-{% if can('manage_documents') %}
+{% if can('documents_delete') %}
 <div class="card confirm-box">
   <p>Deleting this document removes all associated signatures, uploads, and checklist steps.</p>
   <form method="post" action="{{ url_for('delete_document', document_id=document.id) }}">

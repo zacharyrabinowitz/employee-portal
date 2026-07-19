@@ -8,7 +8,7 @@
   </div>
 </div>
 
-{% if can('manage_documents') %}
+{% if can('documents_create') %}
 <div class="card" style="max-width:640px;">
   <h3>New Document</h3>
   <form method="post" action="{{ url_for('admin_documents') }}" enctype="multipart/form-data">

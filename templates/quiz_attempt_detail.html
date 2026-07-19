@@ -16,6 +16,27 @@
   {% else %}
     <span class="badge badge-warning">Not passed — needed {{ quiz.passing_score }}%</span>
   {% endif %}
+
+  {% if can('quizzes_results_edit') %}
+  <form method="post" action="{{ url_for('edit_quiz_attempt', attempt_id=attempt.id) }}" class="btn-row" style="align-items:center; margin-top:1rem; padding-top:1rem; border-top:1px solid var(--border);">
+    <div class="form-group" style="margin:0;">
+      <label for="score" style="font-weight:400;">Score</label>
+      <input type="number" id="score" name="score" min="0" value="{{ attempt.score }}" style="max-width:90px;">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label for="total" style="font-weight:400;">Total</label>
+      <input type="number" id="total" name="total" min="1" value="{{ attempt.total }}" style="max-width:90px;">
+    </div>
+    <div class="checkbox-row form-group" style="margin:0;">
+      <input type="checkbox" id="passed" name="passed" {% if attempt.passed %}checked{% endif %}>
+      <label for="passed" style="margin:0; font-weight:400;">Passed</label>
+    </div>
+    <button type="submit" class="btn btn-secondary btn-small">Save Override</button>
+  </form>
+  <form method="post" action="{{ url_for('delete_quiz_attempt', attempt_id=attempt.id) }}" onsubmit="return confirm('Delete this attempt? This cannot be undone.');" style="margin-top:0.75rem;">
+    <button type="submit" class="btn btn-danger btn-small">Delete Attempt</button>
+  </form>
+  {% endif %}
 </div>
 
 {% for row in review_rows %}

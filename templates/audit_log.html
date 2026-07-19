@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Audit Log · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Audit Log</h1>
+    <p class="page-subtitle">Every change and page visit across the portal. {{ total }} total entries.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card">
+  <form method="get" action="{{ url_for('audit_log_list') }}">
+    <div class="form-group">
+      <label for="q">Search</label>
+      <input type="text" id="q" name="q" value="{{ q }}" placeholder="Search action, entity, path, or person...">
+    </div>
+    <div class="card-grid">
+      <div class="form-group">
+        <label for="actor_id">Person</label>
+        <select id="actor_id" name="actor_id">
+          <option value="">Everyone</option>
+          {% for a in actors %}
+            <option value="{{ a.actor_id }}" {% if actor_id == a.actor_id|string %}selected{% endif %}>{{ a.actor_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="action_type">Type</label>
+        <select id="action_type" name="action_type">
+          <option value="">Everything</option>
+          <option value="change" {% if action_type == 'change' %}selected{% endif %}>Changes only</option>
+          <option value="view" {% if action_type == 'view' %}selected{% endif %}>Page visits only</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="endpoint">Action</label>
+        <select id="endpoint" name="endpoint">
+          <option value="">Any action</option>
+          {% for e in endpoints %}
+            <option value="{{ e.endpoint }}" {% if endpoint == e.endpoint %}selected{% endif %}>{{ e.endpoint.replace('_', ' ').title() }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="date_from">From</label>
+        <input type="date" id="date_from" name="date_from" value="{{ date_from }}">
+      </div>
+      <div class="form-group">
+        <label for="date_to">To</label>
+        <input type="date" id="date_to" name="date_to" value="{{ date_to }}">
+      </div>
+    </div>
+    <div class="btn-row">
+      <button type="submit" class="btn btn-primary">Search</button>
+      <a class="btn btn-secondary" href="{{ url_for('audit_log_list') }}">Clear Filters</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% for entry in entries %}
+    <a class="list-item" href="{{ url_for('audit_log_detail', log_id=entry.id) }}" style="text-decoration:none; color:inherit; cursor:pointer;">
+      <div class="list-item-info">
+        <strong>{{ entry.action_label }}</strong>
+        <span>
+          {{ entry.actor_name or 'Anonymous' }} ({{ entry.actor_role or '—' }}) · {{ entry.created_at }}
+          {% if entry.entity_summary %} · {{ entry.entity_summary }}{% endif %}
+        </span>
+      </div>
+      <div class="btn-row" style="align-items:center;">
+        {% if entry.action_type == 'change' %}
+          <span class="badge badge-warning">{{ entry.method }}</span>
+        {% else %}
+          <span class="badge badge-muted">View</span>
+        {% endif %}
+        {% if entry.status_code and entry.status_code >= 400 %}
+          <span class="badge" style="background:var(--error-bg); color:var(--error);">{{ entry.status_code }}</span>
+        {% endif %}
+      </div>
+    </a>
+  {% else %}
+    <p class="empty-state">No matching audit log entries.</p>
+  {% endfor %}
+</div>
+
+{% if total_pages > 1 %}
+<div class="btn-row" style="justify-content:center; margin-top:1rem;">
+  {% set base_args = request.args.to_dict() %}
+  {% if page > 1 %}
+    {% set _ = base_args.update({'page': page - 1}) %}
+    <a class="btn btn-secondary btn-small" href="{{ url_for('audit_log_list', **base_args) }}">← Previous</a>
+  {% endif %}
+  <span class="badge badge-muted" style="align-self:center;">Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}
+    {% set _ = base_args.update({'page': page + 1}) %}
+    <a class="btn btn-secondary btn-small" href="{{ url_for('audit_log_list', **base_args) }}">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

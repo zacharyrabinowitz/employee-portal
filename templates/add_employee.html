@@ -25,6 +25,9 @@
         <option value="Employee" selected>Employee</option>
         <option value="Manager">Manager</option>
         <option value="Admin">Admin</option>
+        {% for role_name in custom_roles %}
+          <option value="{{ role_name }}">{{ role_name }}</option>
+        {% endfor %}
       </select>
     </div>
     <div class="form-group">

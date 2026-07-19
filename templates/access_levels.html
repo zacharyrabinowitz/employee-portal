@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Access Levels · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Access Levels</h1>
+    <p class="page-subtitle">Every role — Manager, Employee, and any custom access level you create — is managed the same way here: pick exactly what it can see and do. Admin always has full access and isn't editable.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h3>New Access Level</h3>
+  <form method="post" action="{{ url_for('create_access_level') }}">
+    <div class="form-group">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" placeholder="e.g. Trainer, HR, Shift Lead" required>
+    </div>
+    <div class="form-group">
+      <label for="description">Description (optional)</label>
+      <input type="text" id="description" name="description" placeholder="What this access level is for...">
+    </div>
+    <button type="submit" class="btn btn-primary">Create</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Built-in Roles</h3>
+  {% for row in built_in_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ row.name }}</strong>
+        <span>
+          {{ row.permission_count }} permission(s) granted · {{ row.employee_count }} employee(s)
+          {% if row.description %} · {{ row.description }}{% endif %}
+        </span>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-secondary btn-small" href="{{ url_for('edit_role_permissions', role_name=row.name) }}">Set Permissions</a>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3>Custom Access Levels</h3>
+  {% for row in custom_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ row.name }}</strong>
+        <span>
+          {{ row.permission_count }} permission(s) granted · {{ row.employee_count }} employee(s)
+          {% if row.description %} · {{ row.description }}{% endif %}
+        </span>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn-secondary btn-small" href="{{ url_for('edit_role_permissions', role_name=row.name) }}">Set Permissions</a>
+      </div>
+    </div>
+    <details style="margin:-0.5rem 0 0.75rem;">
+      <summary class="form-hint" style="cursor:pointer;">Delete this access level</summary>
+      <form method="post" action="{{ url_for('delete_access_level', role_name=row.name) }}" style="margin-top:0.5rem; padding:0.75rem; border:1px solid var(--error); border-radius:8px; background:var(--error-bg);">
+        <p class="form-hint" style="color:var(--error); margin-top:0;">
+          {% if row.employee_count %}
+            {{ row.employee_count }} employee(s) currently have this access level — they'll be moved to the plain Employee role.
+          {% else %}
+            No employees currently have this access level.
+          {% endif %}
+        </p>
+        <div class="form-group">
+          <label for="confirm_{{ loop.index }}">Type "delete" to confirm</label>
+          <input type="text" id="confirm_{{ loop.index }}" name="confirm" placeholder="delete" required style="max-width:220px;">
+        </div>
+        <button type="submit" class="btn btn-danger btn-small">Delete Access Level</button>
+      </form>
+    </details>
+  {% else %}
+    <p class="empty-state">No custom access levels yet. Create one above.</p>
+  {% endfor %}
+</div>
+{% endblock %}

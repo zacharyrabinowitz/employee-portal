@@ -7,7 +7,7 @@
     <p class="page-subtitle">Custom checklists for different jobs — pick one when adding a new employee.</p>
   </div>
   <div class="btn-row">
-    {% if can('manage_onboarding_checklists') %}
+    {% if can('checklists_templates') %}
     <a class="btn btn-primary" href="{{ url_for('add_onboarding_template') }}">+ New Checklist</a>
     {% endif %}
     <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>

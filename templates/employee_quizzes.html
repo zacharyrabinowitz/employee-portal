@@ -21,7 +21,9 @@
           {% endif %}
         </span>
       </div>
-      {% if row.question_count %}
+      {% if row.locked %}
+        <span class="badge badge-warning">🔒 Locked</span>
+      {% elif row.question_count %}
         <a class="btn btn-primary btn-small" href="{{ url_for('take_quiz', quiz_id=row.quiz.id) }}">
           {% if row.best_attempt %}Retake Quiz{% else %}Take Quiz{% endif %}
         </a>

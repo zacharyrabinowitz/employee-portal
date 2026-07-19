@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Checklist Order · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Checklist Order</h1>
+    <p class="page-subtitle">Set the priority order for checklist item types. The employee dashboard's "Do This Next" card always points to the incomplete item with the lowest number here.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card" style="max-width:480px;">
+  <form method="post" action="{{ url_for('step_order_settings') }}">
+    {% for step_type in current_order %}
+    <div class="form-group checkbox-row">
+      <input type="number" name="rank_{{ step_type }}" value="{{ loop.index }}" min="1" max="{{ current_order|length }}" style="max-width:70px;">
+      <label style="margin:0; font-weight:500;">{{ labels[step_type] }}</label>
+    </div>
+    {% endfor %}
+    <p class="form-hint">Lower number = higher priority. Ties are broken by the current order.</p>
+    <button type="submit" class="btn btn-primary">Save Order</button>
+  </form>
+</div>
+{% endblock %}

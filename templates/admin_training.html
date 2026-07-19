@@ -6,7 +6,7 @@
     <h1>Training Modules</h1>
     <p class="page-subtitle">Create modules and assign them to employees.</p>
   </div>
-  {% if can('manage_training') %}
+  {% if can('training_create') %}
   <a class="btn btn-primary" href="{{ url_for('add_training_module') }}">+ New Training Module</a>
   {% endif %}
 </div>
@@ -24,7 +24,7 @@
         <span>{{ row.completed_count }} / {{ row.assigned_count }} completed · Created {{ row.module.created_at }}</span>
       </div>
       <div class="btn-row">
-        {% if can('manage_training') %}
+        {% if can('training_assign') %}
         <form method="post" action="{{ url_for('toggle_module_onboarding', module_id=row.module.id) }}">
           {% if row.module.is_onboarding %}
             <button type="submit" class="btn btn-secondary btn-small">Remove from Standard Onboarding</button>

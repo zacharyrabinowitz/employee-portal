@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}Reports · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Reports</h1>
+    <p class="page-subtitle">Build a custom report — pick the columns and filters you want, preview it, then download as CSV.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="tabs">
+  <div class="tab-buttons">
+    <button type="button" class="tab-btn {% if report_type == 'employees' or not report_type %}active{% endif %}" data-tab="employees">Employee Directory</button>
+    <button type="button" class="tab-btn {% if report_type == 'checklist' %}active{% endif %}" data-tab="checklist">Checklist Status</button>
+    <button type="button" class="tab-btn {% if report_type == 'quizzes' %}active{% endif %}" data-tab="quizzes">Quiz Results</button>
+  </div>
+
+  <div class="tab-panel {% if report_type == 'employees' or not report_type %}active{% endif %}" data-tab="employees">
+    <div class="card" style="max-width:760px;">
+      <h3>Employee Directory</h3>
+      <form method="get" action="{{ url_for('reports_home') }}">
+        <input type="hidden" name="report_type" value="employees">
+        <div class="form-group">
+          <label>Columns</label>
+          <div class="btn-row" style="margin-bottom:0.5rem;">
+            <button type="button" class="btn btn-secondary btn-small report-select-all">Select All</button>
+            <button type="button" class="btn btn-secondary btn-small report-select-none">Deselect All</button>
+          </div>
+          <div class="card-grid report-columns">
+            {% for key, label in report_columns.employees %}
+            <div class="checkbox-row">
+              <input type="checkbox" name="columns" value="{{ key }}" id="emp_col_{{ key }}" class="report-col-checkbox" checked>
+              <label for="emp_col_{{ key }}" style="font-weight:400;">{{ label }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="form-group">
+            <label for="role">Role</label>
+            <select id="role" name="role">
+              <option value="">All</option>
+              <option value="Admin" {% if args.get('role') == 'Admin' %}selected{% endif %}>Admin</option>
+              <option value="Manager" {% if args.get('role') == 'Manager' %}selected{% endif %}>Manager</option>
+              <option value="Employee" {% if args.get('role') == 'Employee' %}selected{% endif %}>Employee</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="status">Status</label>
+            <select id="status" name="status">
+              <option value="">All</option>
+              <option value="Active" {% if args.get('status') == 'Active' %}selected{% endif %}>Active</option>
+              <option value="Pending" {% if args.get('status') == 'Pending' %}selected{% endif %}>Pending</option>
+              <option value="Inactive" {% if args.get('status') == 'Inactive' %}selected{% endif %}>Inactive</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary">Generate Report</button>
+          <button type="submit" formaction="{{ url_for('reports_export') }}" class="btn btn-secondary">Download CSV</button>
+        </div>
+      </form>
+    </div>
+
+    {% if report_type == 'employees' %}
+    <div class="card">
+      <h3>Results ({{ rows|length }})</h3>
+      {% if rows %}
+      <table>
+        <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>{% for key, label in columns %}<td>{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty-state">No matching employees.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel {% if report_type == 'checklist' %}active{% endif %}" data-tab="checklist">
+    <div class="card" style="max-width:760px;">
+      <h3>Checklist Status</h3>
+      <p class="form-hint">One row per checklist item — covers tasks, documents, uploads, training, and quizzes, since they all live on each employee's checklist.</p>
+      <form method="get" action="{{ url_for('reports_home') }}">
+        <input type="hidden" name="report_type" value="checklist">
+        <div class="form-group">
+          <label>Columns</label>
+          <div class="btn-row" style="margin-bottom:0.5rem;">
+            <button type="button" class="btn btn-secondary btn-small report-select-all">Select All</button>
+            <button type="button" class="btn btn-secondary btn-small report-select-none">Deselect All</button>
+          </div>
+          <div class="card-grid report-columns">
+            {% for key, label in report_columns.checklist %}
+            <div class="checkbox-row">
+              <input type="checkbox" name="columns" value="{{ key }}" id="chk_col_{{ key }}" class="report-col-checkbox" checked>
+              <label for="chk_col_{{ key }}" style="font-weight:400;">{{ label }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="form-group">
+            <label for="step_type">Item Type</label>
+            <select id="step_type" name="step_type">
+              <option value="">All</option>
+              <option value="task" {% if args.get('step_type') == 'task' %}selected{% endif %}>Task</option>
+              <option value="document" {% if args.get('step_type') == 'document' %}selected{% endif %}>Document (Sign)</option>
+              <option value="upload" {% if args.get('step_type') == 'upload' %}selected{% endif %}>Document (Upload)</option>
+              <option value="training" {% if args.get('step_type') == 'training' %}selected{% endif %}>Training</option>
+              <option value="quiz" {% if args.get('step_type') == 'quiz' %}selected{% endif %}>Quiz</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="checklist_status">Status</label>
+            <select id="checklist_status" name="status">
+              <option value="">All</option>
+              <option value="complete" {% if args.get('status') == 'complete' %}selected{% endif %}>Complete</option>
+              <option value="pending" {% if args.get('status') == 'pending' %}selected{% endif %}>Pending</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="employee_id">Employee</label>
+            <select id="employee_id" name="employee_id">
+              <option value="">Everyone</option>
+              {% for emp in employees_list %}
+                <option value="{{ emp.id }}" {% if args.get('employee_id') == emp.id|string %}selected{% endif %}>{{ emp.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary">Generate Report</button>
+          <button type="submit" formaction="{{ url_for('reports_export') }}" class="btn btn-secondary">Download CSV</button>
+        </div>
+      </form>
+    </div>
+
+    {% if report_type == 'checklist' %}
+    <div class="card">
+      <h3>Results ({{ rows|length }})</h3>
+      {% if rows %}
+      <table>
+        <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>{% for key, label in columns %}<td>{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty-state">No matching checklist items.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel {% if report_type == 'quizzes' %}active{% endif %}" data-tab="quizzes">
+    <div class="card" style="max-width:760px;">
+      <h3>Quiz Results</h3>
+      <form method="get" action="{{ url_for('reports_home') }}">
+        <input type="hidden" name="report_type" value="quizzes">
+        <div class="form-group">
+          <label>Columns</label>
+          <div class="btn-row" style="margin-bottom:0.5rem;">
+            <button type="button" class="btn btn-secondary btn-small report-select-all">Select All</button>
+            <button type="button" class="btn btn-secondary btn-small report-select-none">Deselect All</button>
+          </div>
+          <div class="card-grid report-columns">
+            {% for key, label in report_columns.quizzes %}
+            <div class="checkbox-row">
+              <input type="checkbox" name="columns" value="{{ key }}" id="qz_col_{{ key }}" class="report-col-checkbox" checked>
+              <label for="qz_col_{{ key }}" style="font-weight:400;">{{ label }}</label>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="card-grid">
+          <div class="form-group">
+            <label for="quiz_id">Quiz</label>
+            <select id="quiz_id" name="quiz_id">
+              <option value="">All Quizzes</option>
+              {% for quiz in quizzes_list %}
+                <option value="{{ quiz.id }}" {% if args.get('quiz_id') == quiz.id|string %}selected{% endif %}>{{ quiz.title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="passed">Result</label>
+            <select id="passed" name="passed">
+              <option value="">All</option>
+              <option value="passed" {% if args.get('passed') == 'passed' %}selected{% endif %}>Passed</option>
+              <option value="failed" {% if args.get('passed') == 'failed' %}selected{% endif %}>Failed</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary">Generate Report</button>
+          <button type="submit" formaction="{{ url_for('reports_export') }}" class="btn btn-secondary">Download CSV</button>
+        </div>
+      </form>
+    </div>
+
+    {% if report_type == 'quizzes' %}
+    <div class="card">
+      <h3>Results ({{ rows|length }})</h3>
+      {% if rows %}
+      <table>
+        <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>{% for key, label in columns %}<td>{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty-state">No matching quiz attempts.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+document.addEventListener('click', function (e) {
+  var selectAll = e.target.classList.contains('report-select-all');
+  var selectNone = e.target.classList.contains('report-select-none');
+  if (!selectAll && !selectNone) return;
+  e.preventDefault();
+  var formGroup = e.target.closest('.form-group');
+  if (!formGroup) return;
+  formGroup.querySelectorAll('.report-col-checkbox').forEach(function (cb) {
+    cb.checked = selectAll;
+  });
+});
+</script>
+{% endblock %}

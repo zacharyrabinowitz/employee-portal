@@ -1,3 +1,4 @@
+import csv
 import io
 import json
 import mimetypes
@@ -24,6 +25,7 @@ from flask import (
     flash,
     send_file,
     send_from_directory,
+    Response,
 )
 
 DB_PATH = "portal.db"
@@ -185,6 +187,152 @@ def close_db(exception=None):
 
 
 # ---------------------------------------------------------------------------
+# Roles — Admin/Manager/Employee are built in; admins can also create custom
+# "access levels" (stored in custom_roles) that behave like Manager: they see
+# the admin-side portal and get whatever's granted in role_permissions.
+# ---------------------------------------------------------------------------
+
+def get_custom_role_names(db):
+    return [row["name"] for row in db.execute("SELECT name FROM custom_roles ORDER BY name").fetchall()]
+
+
+def get_admin_side_roles(db):
+    """Roles that see the admin-side portal (nav, dashboard, etc). Employee
+    stays on the standard employee-side experience by default, but if it's
+    been granted any admin-side permission at all, it gains access to the
+    admin portal too (scoped to exactly what it was granted)."""
+    roles = ADMIN_ROLES + tuple(get_custom_role_names(db))
+    if db.execute("SELECT 1 FROM role_permissions WHERE role = 'Employee' LIMIT 1").fetchone():
+        roles = roles + ("Employee",)
+    return roles
+
+
+def get_all_roles(db):
+    """Every role an employee can be assigned."""
+    return ("Admin", "Manager", "Employee") + tuple(get_custom_role_names(db))
+
+
+# ---------------------------------------------------------------------------
+# Audit log — automatically records every request (page visits and changes
+# alike) with no per-route instrumentation needed. Route URL parameters like
+# document_id/employee_id/quiz_id are resolved to a human-readable label
+# *before* the view runs, so deletions still show what was deleted.
+# ---------------------------------------------------------------------------
+
+ENTITY_LOOKUPS = {
+    "employee_id": ("employees", "name"),
+    "document_id": ("documents", "title"),
+    "quiz_id": ("quizzes", "title"),
+    "question_id": ("quiz_questions", "question_text"),
+    "attempt_id": ("quiz_attempts", None),
+    "template_id": ("onboarding_templates", "name"),
+    "module_id": ("training_modules", "title"),
+    "item_id": ("onboarding_template_items", "step_name"),
+    "step_id": ("onboarding_steps", "step_name"),
+    "upload_id": ("employee_uploads", "label"),
+    "signature_id": ("signatures", "signature_text"),
+    "note_id": ("notes", "body"),
+    "slide_id": ("training_slides", "caption"),
+    "element_id": ("slide_elements", "element_type"),
+}
+
+AUDIT_SKIP_PREFIXES = ("/static/",)
+
+
+@app.before_request
+def audit_capture_entities():
+    """Resolve any recognized ID URL parameters to a human label before the
+    view runs, so that if the view deletes the row, we still logged what it
+    was."""
+    entities = []
+    view_args = request.view_args or {}
+    if view_args:
+        db = get_db()
+        for key, value in view_args.items():
+            lookup = ENTITY_LOOKUPS.get(key)
+            if not lookup:
+                continue
+            table, label_col = lookup
+            label = None
+            if label_col:
+                try:
+                    row = db.execute(
+                        f"SELECT {label_col} FROM {table} WHERE id = ?", (value,)
+                    ).fetchone()
+                except sqlite3.Error:
+                    row = None
+                if row is not None:
+                    label = row[label_col]
+            entities.append({"table": table, "id": value, "label": label})
+    g.audit_entities = entities
+
+
+@app.after_request
+def audit_log_request(response):
+    """Best-effort request logging — must never break the actual request, so
+    any failure here is swallowed rather than surfaced."""
+    try:
+        if request.path.startswith(AUDIT_SKIP_PREFIXES):
+            return response
+
+        db = get_db()
+        endpoint = request.endpoint or ""
+        action_label = endpoint.replace("_", " ").title() if endpoint else request.path
+        action_type = "view" if request.method == "GET" else "change"
+
+        entities = getattr(g, "audit_entities", [])
+        summary_parts = []
+        for e in entities:
+            if e["label"] and str(e["label"]) != str(e["id"]):
+                summary_parts.append(f"{e['table']} #{e['id']} ({e['label']})")
+            else:
+                summary_parts.append(f"{e['table']} #{e['id']}")
+        entity_summary = "; ".join(summary_parts) or None
+
+        form_snapshot = {}
+        if request.method != "GET" and request.form:
+            for key in request.form:
+                if "password" in key.lower():
+                    continue
+                values = request.form.getlist(key)
+                values = [v[:300] + "..." if len(v) > 300 else v for v in values]
+                form_snapshot[key] = values if len(values) > 1 else values[0]
+
+        details = json.dumps(
+            {
+                "view_args": {k: v for k, v in (request.view_args or {}).items()},
+                "form": form_snapshot,
+                "entities": entities,
+                "query_string": request.query_string.decode("utf-8", "ignore") or None,
+            }
+        )
+
+        db.execute(
+            """INSERT INTO audit_log
+               (actor_id, actor_name, actor_role, method, path, endpoint, action_label,
+                action_type, status_code, entity_summary, details)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session.get("user_id"),
+                session.get("name"),
+                session.get("role"),
+                request.method,
+                request.path,
+                endpoint,
+                action_label,
+                action_type,
+                response.status_code,
+                entity_summary,
+                details,
+            ),
+        )
+        db.commit()
+    except Exception:
+        pass
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Auth / session helpers (manual, no auth library or decorators)
 # ---------------------------------------------------------------------------
 
@@ -205,11 +353,12 @@ def require_login():
 
 
 def require_admin_or_manager():
-    """Return a redirect response if not logged in as Admin/Manager, otherwise None."""
+    """Return a redirect response if not logged in as an admin-side role
+    (Admin, Manager, or a custom access level), otherwise None."""
     resp = require_login()
     if resp:
         return resp
-    if session.get("role") not in ADMIN_ROLES:
+    if session.get("role") not in get_admin_side_roles(get_db()):
         return redirect(url_for("employee_dashboard"))
     return None
 
@@ -228,26 +377,65 @@ def require_admin():
 # Role permissions (configurable access for the Manager role)
 # ---------------------------------------------------------------------------
 
-PERMISSIONS = [
-    ("manage_employees", "Add and edit employees; manage their notes and document requests"),
-    ("manage_documents", "Create and delete policy documents"),
-    ("manage_training", "Create, edit, and delete training modules; assign training"),
-    ("manage_quizzes", "Create, edit, and delete quizzes; view results"),
-    ("manage_onboarding_checklists", "Create and manage onboarding checklist templates"),
-    ("manage_settings", "Access Settings (signup page customization, etc.)"),
+PERMISSION_CATEGORIES = [
+    ("Employees", [
+        ("employees_add", "Add new employees"),
+        ("employees_edit", "Edit employee profile details"),
+        ("employees_status", "Activate and deactivate employee accounts"),
+        ("employees_password", "Change an employee's password"),
+        ("employees_notes", "Add, edit, and delete notes on an employee"),
+        ("employees_checklist", "Edit an employee's individual checklist (remove steps, request uploads)"),
+    ]),
+    ("Documents", [
+        ("documents_create", "Create new policy documents"),
+        ("documents_edit", "Edit existing documents"),
+        ("documents_delete", "Delete documents"),
+        ("documents_signatures", "Remove individual employee signatures"),
+    ]),
+    ("Training", [
+        ("training_create", "Create training modules"),
+        ("training_edit", "Edit training module details"),
+        ("training_delete", "Delete training modules"),
+        ("training_slides", "Manage slides and the slide editor"),
+        ("training_assign", "Assign training and toggle \"required for everyone\""),
+    ]),
+    ("Quizzes", [
+        ("quizzes_create", "Create quizzes"),
+        ("quizzes_edit", "Edit quiz details and questions"),
+        ("quizzes_delete", "Delete quizzes and questions"),
+        ("quizzes_assign", "Assign quizzes and toggle \"required for everyone\""),
+        ("quizzes_lock", "Lock and unlock quizzes per employee"),
+        ("quizzes_results_view", "View quiz results and attempt detail"),
+        ("quizzes_results_edit", "Edit or delete quiz attempts (override scores)"),
+    ]),
+    ("Onboarding Checklists", [
+        ("checklists_templates", "Create, edit, and delete job-specific checklists"),
+        ("checklists_items", "Add, edit, and remove items on a checklist"),
+        ("checklists_master", "Manage the master checklist"),
+        ("checklists_order", "Set checklist priority order"),
+    ]),
+    ("Settings", [
+        ("settings_signup_page", "Customize the signup page"),
+    ]),
+    ("Reports", [
+        ("reports_view", "View and export reports"),
+    ]),
 ]
+PERMISSIONS = [item for _, items in PERMISSION_CATEGORIES for item in items]
 PERMISSION_KEYS = {key for key, _ in PERMISSIONS}
 
 
 def has_permission(db, role, permission):
-    """Admin always has every permission. Employee never has any. Manager is
-    whatever's been explicitly granted in role_permissions."""
+    """Admin always has every permission. Every other role — Manager,
+    Employee, or a custom access level — gets exactly whatever's been
+    explicitly granted to that role name in role_permissions. Employee
+    starts with nothing granted (today's default behavior), but is no
+    longer a hardcoded special case — it can be given specific admin-side
+    capabilities the same way any other role can."""
     if role == "Admin":
         return True
-    if role != "Manager":
-        return False
     row = db.execute(
-        "SELECT 1 FROM role_permissions WHERE role = ? AND permission = ?", ("Manager", permission)
+        "SELECT 1 FROM role_permissions WHERE role = ? AND permission = ?", (role, permission)
     ).fetchone()
     return row is not None
 
@@ -272,7 +460,10 @@ def inject_permission_helper():
             return False
         return has_permission(get_db(), session.get("role"), permission)
 
-    return {"can": can}
+    def is_admin_side_role(role):
+        return role in get_admin_side_roles(get_db())
+
+    return {"can": can, "is_admin_side_role": is_admin_side_role}
 
 
 def current_employee(db):
@@ -285,10 +476,87 @@ def current_employee(db):
 # Progress helpers
 # ---------------------------------------------------------------------------
 
+DEFAULT_STEP_TYPE_PRIORITY = ["task", "document", "upload", "training", "quiz"]
+STEP_TYPE_LABELS = {
+    "task": "Tasks",
+    "document": "Documents to Sign",
+    "upload": "Documents to Upload",
+    "training": "Training Modules",
+    "quiz": "Quizzes",
+}
+
+
+def get_step_type_priority(db):
+    """Admin-configurable order (Settings → Checklist Order) controlling both
+    which incomplete step is surfaced as 'do this next' on the dashboard and
+    the order steps appear in on the checklist page."""
+    row = db.execute(
+        "SELECT value FROM portal_settings WHERE key = 'step_type_priority'"
+    ).fetchone()
+    if row and row["value"]:
+        try:
+            order = json.loads(row["value"])
+        except (ValueError, TypeError):
+            order = None
+        if isinstance(order, list) and order:
+            for step_type in DEFAULT_STEP_TYPE_PRIORITY:
+                if step_type not in order:
+                    order.append(step_type)
+            return order
+    return list(DEFAULT_STEP_TYPE_PRIORITY)
+
+
+def resolve_checklist_display_name(db, step_type, related_id, fallback_name):
+    """Compute a checklist item's display name live from its source
+    (document/training module/quiz) instead of trusting a name that was
+    copied in at creation time — so renaming the source is reflected
+    everywhere instantly instead of leaving a stale copy behind. Falls back
+    to the stored name for tasks (which have no live source) or if the
+    source row is somehow already gone."""
+    if related_id:
+        if step_type == "document":
+            row = db.execute("SELECT title FROM documents WHERE id = ?", (related_id,)).fetchone()
+            if row:
+                return f"Sign {row['title']}"
+        elif step_type == "upload":
+            row = db.execute("SELECT title FROM documents WHERE id = ?", (related_id,)).fetchone()
+            if row:
+                return f"Upload {row['title']}"
+        elif step_type == "training":
+            row = db.execute(
+                "SELECT title FROM training_modules WHERE id = ?", (related_id,)
+            ).fetchone()
+            if row:
+                return f"Complete {row['title']}"
+        elif step_type == "quiz":
+            row = db.execute("SELECT title FROM quizzes WHERE id = ?", (related_id,)).fetchone()
+            if row:
+                return f"Take Quiz: {row['title']}"
+    return fallback_name
+
+
 def onboarding_progress(db, employee_id):
-    steps = db.execute(
+    raw_steps = db.execute(
         "SELECT * FROM onboarding_steps WHERE employee_id = ? ORDER BY id", (employee_id,)
     ).fetchall()
+    priority = get_step_type_priority(db)
+
+    steps = []
+    for step in raw_steps:
+        step_dict = dict(step)
+        step_dict["step_name"] = resolve_checklist_display_name(
+            db, step["step_type"], step["related_id"], step["step_name"]
+        )
+        steps.append(step_dict)
+
+    def sort_key(step):
+        try:
+            rank = priority.index(step["step_type"])
+        except ValueError:
+            rank = len(priority)
+        return (1 if step["completed_at"] else 0, rank, step["id"])
+
+    steps = sorted(steps, key=sort_key)
     total = len(steps)
     completed = len([s for s in steps if s["completed_at"]])
     pct = round((completed / total) * 100) if total else 0
@@ -479,6 +747,34 @@ def mark_quiz_step_complete(db, employee_id, quiz_id):
     )
 
 
+def is_quiz_locked_for(db, quiz_id, employee_id):
+    return (
+        db.execute(
+            "SELECT 1 FROM quiz_locks WHERE quiz_id = ? AND employee_id = ?",
+            (quiz_id, employee_id),
+        ).fetchone()
+        is not None
+    )
+
+
+def sync_quiz_checklist_step(db, employee_id, quiz_id):
+    """Called after an admin edits or deletes an attempt — keeps the checklist
+    step's completed state honest: complete if any passing attempt remains,
+    pending again if not."""
+    has_pass = db.execute(
+        "SELECT 1 FROM quiz_attempts WHERE employee_id = ? AND quiz_id = ? AND passed = 1",
+        (employee_id, quiz_id),
+    ).fetchone()
+    if has_pass:
+        mark_quiz_step_complete(db, employee_id, quiz_id)
+    else:
+        db.execute(
+            """UPDATE onboarding_steps SET completed_at = NULL
+               WHERE employee_id = ? AND step_type = 'quiz' AND related_id = ?""",
+            (employee_id, quiz_id),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Root / login / logout
 # ---------------------------------------------------------------------------
@@ -487,7 +783,7 @@ def mark_quiz_step_complete(db, employee_id, quiz_id):
 def index():
     if "user_id" not in session:
         return redirect(url_for("login"))
-    if session.get("role") in ADMIN_ROLES:
+    if session.get("role") in get_admin_side_roles(get_db()):
         return redirect(url_for("admin_dashboard"))
     return redirect(url_for("employee_dashboard"))
 
@@ -521,7 +817,7 @@ def login():
         session["name"] = employee["name"]
         session["role"] = employee["role"]
 
-        if employee["role"] in ADMIN_ROLES:
+        if employee["role"] in get_admin_side_roles(db):
             return redirect(url_for("admin_dashboard"))
         return redirect(url_for("employee_dashboard"))
 
@@ -561,12 +857,24 @@ def admin_dashboard():
             }
         )
 
-    return render_template("admin_dashboard.html", rows=rows)
+    document_count = db.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    training_count = db.execute("SELECT COUNT(*) FROM training_modules").fetchone()[0]
+    quiz_count = db.execute("SELECT COUNT(*) FROM quizzes").fetchone()[0]
+    employee_count = len(employees)
+
+    return render_template(
+        "admin_dashboard.html",
+        rows=rows,
+        document_count=document_count,
+        training_count=training_count,
+        quiz_count=quiz_count,
+        employee_count=employee_count,
+    )
 
 
 @app.route("/admin/employees/add", methods=["GET", "POST"])
 def add_employee():
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_add")
     if resp:
         return resp
 
@@ -582,7 +890,7 @@ def add_employee():
         date_of_birth = request.form.get("date_of_birth", "").strip()
         template_id = request.form.get("onboarding_template_id") or None
 
-        if role not in ("Admin", "Manager", "Employee"):
+        if role not in get_all_roles(db):
             role = "Employee"
 
         existing = db.execute(
@@ -591,14 +899,14 @@ def add_employee():
         if existing:
             flash("An employee with that email already exists.", "error")
             templates = db.execute("SELECT * FROM onboarding_templates ORDER BY name").fetchall()
-            return render_template("add_employee.html", templates=templates)
+            return render_template("add_employee.html", templates=templates, custom_roles=get_custom_role_names(db))
 
         try:
             dob_date = datetime.strptime(date_of_birth, "%Y-%m-%d")
         except ValueError:
             flash("Please enter a valid date of birth — it's used to generate their password.", "error")
             templates = db.execute("SELECT * FROM onboarding_templates ORDER BY name").fetchall()
-            return render_template("add_employee.html", templates=templates)
+            return render_template("add_employee.html", templates=templates, custom_roles=get_custom_role_names(db))
 
         from werkzeug.security import generate_password_hash
 
@@ -630,7 +938,7 @@ def add_employee():
         return redirect(url_for("employee_profile_admin", employee_id=new_id))
 
     templates = db.execute("SELECT * FROM onboarding_templates ORDER BY name").fetchall()
-    return render_template("add_employee.html", templates=templates)
+    return render_template("add_employee.html", templates=templates, custom_roles=get_custom_role_names(db))
 
 
 @app.route("/admin/employees/<int:employee_id>")
@@ -688,7 +996,7 @@ def employee_profile_admin(employee_id):
 
 @app.route("/admin/employees/checklist-steps/<int:step_id>/delete", methods=["POST"])
 def delete_employee_onboarding_step(step_id):
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_checklist")
     if resp:
         return resp
 
@@ -699,15 +1007,79 @@ def delete_employee_onboarding_step(step_id):
         return redirect(url_for("admin_dashboard"))
 
     employee_id = step["employee_id"]
+    # A file the employee already uploaded for this step shouldn't vanish —
+    # just detach it from the step being removed; it stays visible under
+    # their own "My Documents" list.
+    db.execute(
+        "UPDATE employee_uploads SET onboarding_step_id = NULL WHERE onboarding_step_id = ?",
+        (step_id,),
+    )
     db.execute("DELETE FROM onboarding_steps WHERE id = ?", (step_id,))
     db.commit()
     flash(f'Removed "{step["step_name"]}" from the checklist.', "success")
     return redirect(url_for("employee_profile_admin", employee_id=employee_id))
 
 
+@app.route("/admin/employees/<int:employee_id>/toggle-status", methods=["POST"])
+def toggle_employee_status(employee_id):
+    resp = require_permission("employees_status")
+    if resp:
+        return resp
+
+    db = get_db()
+    employee = db.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    if employee is None:
+        flash("Employee not found.", "error")
+        return redirect(url_for("admin_dashboard"))
+
+    if employee_id == session["user_id"]:
+        flash("You cannot deactivate your own account.", "error")
+        return redirect(request.referrer or url_for("admin_dashboard"))
+
+    new_status = "Active" if employee["status"] != "Active" else "Inactive"
+    db.execute("UPDATE employees SET status = ? WHERE id = ?", (new_status, employee_id))
+    db.commit()
+    flash(f'{employee["name"]} is now {new_status.lower()}.', "success")
+    return redirect(request.referrer or url_for("admin_dashboard"))
+
+
+@app.route("/admin/employees/<int:employee_id>/change-password", methods=["POST"])
+def change_employee_password(employee_id):
+    resp = require_permission("employees_password")
+    if resp:
+        return resp
+
+    db = get_db()
+    employee = db.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    if employee is None:
+        flash("Employee not found.", "error")
+        return redirect(url_for("admin_dashboard"))
+
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+    redirect_url = url_for("employee_profile_admin", employee_id=employee_id) + "#danger"
+
+    if len(new_password) < 6:
+        flash("Password must be at least 6 characters.", "error")
+        return redirect(redirect_url)
+    if new_password != confirm_password:
+        flash("Passwords don't match.", "error")
+        return redirect(redirect_url)
+
+    from werkzeug.security import generate_password_hash
+
+    db.execute(
+        "UPDATE employees SET password_hash = ? WHERE id = ?",
+        (generate_password_hash(new_password), employee_id),
+    )
+    db.commit()
+    flash(f"Password changed for {employee['name']}.", "success")
+    return redirect(redirect_url)
+
+
 @app.route("/admin/employees/<int:employee_id>/edit", methods=["GET", "POST"])
 def edit_employee(employee_id):
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_edit")
     if resp:
         return resp
 
@@ -728,7 +1100,7 @@ def edit_employee(employee_id):
         date_of_birth = request.form.get("date_of_birth", "").strip()
         template_id = request.form.get("onboarding_template_id") or None
 
-        if role not in ("Admin", "Manager", "Employee"):
+        if role not in get_all_roles(db):
             role = employee["role"]
         if status not in ("Active", "Pending", "Inactive"):
             status = employee["status"]
@@ -741,7 +1113,7 @@ def edit_employee(employee_id):
             except ValueError:
                 flash("Please enter a valid date of birth.", "error")
                 templates = db.execute("SELECT * FROM onboarding_templates ORDER BY name").fetchall()
-                return render_template("edit_employee.html", employee=employee, templates=templates)
+                return render_template("edit_employee.html", employee=employee, templates=templates, custom_roles=get_custom_role_names(db))
 
             from werkzeug.security import generate_password_hash
 
@@ -784,7 +1156,7 @@ def edit_employee(employee_id):
         return redirect(url_for("employee_profile_admin", employee_id=employee_id))
 
     templates = db.execute("SELECT * FROM onboarding_templates ORDER BY name").fetchall()
-    return render_template("edit_employee.html", employee=employee, templates=templates)
+    return render_template("edit_employee.html", employee=employee, templates=templates, custom_roles=get_custom_role_names(db))
 
 
 @app.route("/admin/employees/<int:employee_id>/delete", methods=["POST"])
@@ -817,6 +1189,14 @@ def delete_employee(employee_id):
     db.execute("DELETE FROM signatures WHERE employee_id = ?", (employee_id,))
     db.execute("DELETE FROM training_assignments WHERE employee_id = ?", (employee_id,))
     db.execute("DELETE FROM onboarding_steps WHERE employee_id = ?", (employee_id,))
+    db.execute(
+        """DELETE FROM quiz_attempt_answers WHERE attempt_id IN (
+             SELECT id FROM quiz_attempts WHERE employee_id = ?
+           )""",
+        (employee_id,),
+    )
+    db.execute("DELETE FROM quiz_attempts WHERE employee_id = ?", (employee_id,))
+    db.execute("DELETE FROM quiz_locks WHERE employee_id = ?", (employee_id,))
     db.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
     db.commit()
 
@@ -826,7 +1206,7 @@ def delete_employee(employee_id):
 
 @app.route("/admin/employees/<int:employee_id>/notes", methods=["POST"])
 def add_note(employee_id):
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_notes")
     if resp:
         return resp
 
@@ -845,7 +1225,7 @@ def add_note(employee_id):
 
 @app.route("/admin/employees/<int:employee_id>/notes/<int:note_id>/edit", methods=["POST"])
 def edit_note(employee_id, note_id):
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_notes")
     if resp:
         return resp
 
@@ -871,7 +1251,7 @@ def edit_note(employee_id, note_id):
 
 @app.route("/admin/employees/<int:employee_id>/notes/<int:note_id>/delete", methods=["POST"])
 def delete_note(employee_id, note_id):
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_notes")
     if resp:
         return resp
 
@@ -887,7 +1267,7 @@ def delete_note(employee_id, note_id):
 
 @app.route("/admin/employees/<int:employee_id>/request-upload", methods=["POST"])
 def request_employee_upload(employee_id):
-    resp = require_permission("manage_employees")
+    resp = require_permission("employees_checklist")
     if resp:
         return resp
 
@@ -995,6 +1375,23 @@ def employee_dashboard():
         (employee["id"],),
     ).fetchall()
 
+    next_step = None
+    next_step_url = None
+    for step in steps:
+        if not step["completed_at"]:
+            next_step = step
+            break
+    if next_step:
+        step_type = next_step["step_type"]
+        if step_type == "document":
+            next_step_url = url_for("document_sign", document_id=next_step["related_id"])
+        elif step_type == "training":
+            next_step_url = url_for("training_module_view", module_id=next_step["related_id"])
+        elif step_type == "quiz":
+            next_step_url = url_for("take_quiz", quiz_id=next_step["related_id"])
+        else:
+            next_step_url = url_for("employee_checklist")
+
     return render_template(
         "employee_dashboard.html",
         employee=employee,
@@ -1002,8 +1399,12 @@ def employee_dashboard():
         steps_done=steps_done,
         steps_total=steps_total,
         assignments=assignments,
+        train_done=train_done,
+        train_total=train_total,
         training_pct=training_pct,
         pending_docs=pending_docs,
+        next_step=next_step,
+        next_step_url=next_step_url,
     )
 
 
@@ -1078,7 +1479,7 @@ def employee_upload_file(upload_id):
         flash("File not found.", "error")
         return redirect(url_for("employee_dashboard"))
 
-    if session.get("role") not in ADMIN_ROLES and upload["employee_id"] != session["user_id"]:
+    if session.get("role") not in get_admin_side_roles(db) and upload["employee_id"] != session["user_id"]:
         flash("You do not have permission to view that file.", "error")
         return redirect(url_for("employee_dashboard"))
 
@@ -1097,11 +1498,11 @@ def delete_employee_upload(upload_id):
         flash("File not found.", "error")
         return redirect(url_for("employee_checklist"))
 
-    if session.get("role") not in ADMIN_ROLES and upload["employee_id"] != session["user_id"]:
+    if session.get("role") not in get_admin_side_roles(db) and upload["employee_id"] != session["user_id"]:
         flash("You do not have permission to delete that file.", "error")
         return redirect(url_for("employee_checklist"))
 
-    is_admin_view = session.get("role") in ADMIN_ROLES and upload["employee_id"] != session["user_id"]
+    is_admin_view = session.get("role") in get_admin_side_roles(db) and upload["employee_id"] != session["user_id"]
 
     try:
         os.remove(os.path.join(EMPLOYEE_UPLOAD_FOLDER, upload["file_path"]))
@@ -1236,7 +1637,7 @@ def admin_documents():
     db = get_db()
 
     if request.method == "POST":
-        resp = require_permission("manage_documents")
+        resp = require_permission("documents_create")
         if resp:
             return resp
 
@@ -1352,9 +1753,52 @@ def document_audit(document_id):
     )
 
 
+@app.route("/admin/documents/<int:document_id>/edit", methods=["POST"])
+def edit_document(document_id):
+    resp = require_permission("documents_edit")
+    if resp:
+        return resp
+
+    db = get_db()
+    document = db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if document is None:
+        flash("Document not found.", "error")
+        return redirect(url_for("admin_documents"))
+
+    title = request.form.get("title", "").strip()
+    content = request.form.get("content", "").strip()
+    if not title:
+        flash("Title is required.", "error")
+        return redirect(url_for("document_audit", document_id=document_id))
+
+    file = request.files.get("document_file")
+    file_path = document["file_path"]
+    if file and file.filename:
+        if not allowed_file(file.filename):
+            flash("Unsupported file type. Allowed: PDF, Word, text, PNG, JPG.", "error")
+            return redirect(url_for("document_audit", document_id=document_id))
+        if file_path:
+            try:
+                os.remove(os.path.join(UPLOAD_FOLDER, file_path))
+            except OSError:
+                pass
+        ext = file.filename.rsplit(".", 1)[1].lower()
+        stored_name = f"{secrets.token_hex(8)}.{ext}"
+        file.save(os.path.join(UPLOAD_FOLDER, stored_name))
+        file_path = stored_name
+
+    db.execute(
+        "UPDATE documents SET title = ?, content = ?, file_path = ? WHERE id = ?",
+        (title, content, file_path, document_id),
+    )
+    db.commit()
+    flash("Document updated.", "success")
+    return redirect(url_for("document_audit", document_id=document_id))
+
+
 @app.route("/admin/documents/<int:document_id>/delete", methods=["POST"])
 def delete_document(document_id):
-    resp = require_permission("manage_documents")
+    resp = require_permission("documents_delete")
     if resp:
         return resp
 
@@ -1412,6 +1856,33 @@ def delete_document(document_id):
 
     flash("Document deleted.", "success")
     return redirect(url_for("admin_documents"))
+
+
+@app.route("/admin/documents/signatures/<int:signature_id>/delete", methods=["POST"])
+def delete_signature(signature_id):
+    resp = require_permission("documents_signatures")
+    if resp:
+        return resp
+
+    db = get_db()
+    signature = db.execute("SELECT * FROM signatures WHERE id = ?", (signature_id,)).fetchone()
+    if signature is None:
+        flash("Signature not found.", "error")
+        return redirect(url_for("admin_documents"))
+
+    document_id = signature["document_id"]
+    employee_id = signature["employee_id"]
+    db.execute("DELETE FROM signatures WHERE id = ?", (signature_id,))
+    # Signing was what completed this checklist step — removing the signature
+    # puts the requirement back on their checklist as incomplete.
+    db.execute(
+        """UPDATE onboarding_steps SET completed_at = NULL
+           WHERE employee_id = ? AND step_type = 'document' AND related_id = ?""",
+        (employee_id, document_id),
+    )
+    db.commit()
+    flash("Signature removed; that employee's checklist step is pending again.", "success")
+    return redirect(url_for("document_audit", document_id=document_id))
 
 
 @app.route("/documents/file/<path:filename>")
@@ -1499,7 +1970,7 @@ def admin_training():
 
 @app.route("/admin/training/create", methods=["GET", "POST"])
 def add_training_module():
-    resp = require_permission("manage_training")
+    resp = require_permission("training_create")
     if resp:
         return resp
 
@@ -1537,7 +2008,7 @@ def add_training_module():
 
 @app.route("/admin/training/<int:module_id>/toggle-onboarding", methods=["POST"])
 def toggle_module_onboarding(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_assign")
     if resp:
         return resp
 
@@ -1632,7 +2103,7 @@ def preview_training_module(module_id):
 
 @app.route("/admin/training/<int:module_id>/edit", methods=["POST"])
 def edit_training_module(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_edit")
     if resp:
         return resp
 
@@ -1662,7 +2133,7 @@ def edit_training_module(module_id):
 
 @app.route("/admin/training/<int:module_id>/slides", methods=["POST"])
 def add_training_slides(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1687,7 +2158,7 @@ def add_training_slides(module_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/delete", methods=["POST"])
 def delete_training_slide(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1723,7 +2194,7 @@ def delete_training_slide(slide_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/caption", methods=["POST"])
 def update_training_slide_caption(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1747,7 +2218,7 @@ def update_training_slide_caption(slide_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/edit")
 def slide_editor(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1776,7 +2247,7 @@ def slide_editor(slide_id):
 
 @app.route("/admin/training/<int:module_id>/slides/blank", methods=["POST"])
 def add_blank_slide(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1801,7 +2272,7 @@ def add_blank_slide(module_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/duplicate", methods=["POST"])
 def duplicate_training_slide(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1892,7 +2363,7 @@ def duplicate_training_slide(slide_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/background", methods=["POST"])
 def update_slide_background(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1913,7 +2384,7 @@ def update_slide_background(slide_id):
 
 @app.route("/admin/training/<int:module_id>/slides/reorder", methods=["POST"])
 def reorder_slides(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1947,7 +2418,7 @@ def reorder_slides(module_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/elements/text", methods=["POST"])
 def add_text_element(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -1977,7 +2448,7 @@ def add_text_element(slide_id):
 
 @app.route("/admin/training/slides/<int:slide_id>/elements/media", methods=["POST"])
 def add_media_element(slide_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -2021,7 +2492,7 @@ def add_media_element(slide_id):
 
 @app.route("/admin/training/slides/elements/<int:element_id>/update", methods=["POST"])
 def update_slide_element(element_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -2080,7 +2551,7 @@ def update_slide_element(element_id):
 
 @app.route("/admin/training/slides/elements/<int:element_id>/bring-to-front", methods=["POST"])
 def bring_element_to_front(element_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -2101,7 +2572,7 @@ def bring_element_to_front(element_id):
 
 @app.route("/admin/training/slides/elements/<int:element_id>/delete", methods=["POST"])
 def delete_slide_element(element_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_slides")
     if resp:
         return resp
 
@@ -2174,7 +2645,7 @@ def slide_element_media(element_id):
 
 @app.route("/admin/training/<int:module_id>/assign", methods=["POST"])
 def assign_training(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_assign")
     if resp:
         return resp
 
@@ -2202,7 +2673,7 @@ def assign_training(module_id):
 
 @app.route("/admin/training/<int:module_id>/delete", methods=["POST"])
 def delete_training(module_id):
-    resp = require_permission("manage_training")
+    resp = require_permission("training_delete")
     if resp:
         return resp
 
@@ -2240,6 +2711,12 @@ def delete_training(module_id):
     db.execute("DELETE FROM training_assignments WHERE module_id = ?", (module_id,))
     db.execute(
         "DELETE FROM onboarding_template_items WHERE step_type = 'training' AND related_id = ?",
+        (module_id,),
+    )
+    # Quizzes can reference a training module as "related material" — that's a
+    # soft link, not a reason to block deleting the module, so just detach it.
+    db.execute(
+        "UPDATE quizzes SET training_module_id = NULL WHERE training_module_id = ?",
         (module_id,),
     )
     db.execute("DELETE FROM training_modules WHERE id = ?", (module_id,))
@@ -2316,6 +2793,7 @@ def delete_quiz_cascade(db, quiz_id):
     for question_id in question_ids:
         delete_question_cascade(db, question_id)
     db.execute("DELETE FROM quiz_attempts WHERE quiz_id = ?", (quiz_id,))
+    db.execute("DELETE FROM quiz_locks WHERE quiz_id = ?", (quiz_id,))
     db.execute(
         "DELETE FROM onboarding_steps WHERE step_type = 'quiz' AND related_id = ?", (quiz_id,)
     )
@@ -2432,7 +2910,7 @@ def admin_quizzes():
 
 @app.route("/admin/quizzes/create", methods=["GET", "POST"])
 def create_quiz():
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_create")
     if resp:
         return resp
 
@@ -2566,6 +3044,19 @@ def quiz_detail_admin(quiz_id):
         if emp["id"] not in assigned_employee_ids
     ]
 
+    locked_ids = {
+        row["employee_id"]
+        for row in db.execute(
+            "SELECT employee_id FROM quiz_locks WHERE quiz_id = ?", (quiz_id,)
+        ).fetchall()
+    }
+    all_employees = db.execute(
+        "SELECT * FROM employees WHERE role = 'Employee' ORDER BY name"
+    ).fetchall()
+    lock_rows = [
+        {"employee": emp, "locked": emp["id"] in locked_ids} for emp in all_employees
+    ]
+
     return render_template(
         "quiz_detail_admin.html",
         quiz=quiz,
@@ -2573,12 +3064,13 @@ def quiz_detail_admin(quiz_id):
         training_modules=training_modules,
         attempt_count=attempt_count,
         assignable_employees=assignable_employees,
+        lock_rows=lock_rows,
     )
 
 
 @app.route("/admin/quizzes/<int:quiz_id>/edit", methods=["POST"])
 def edit_quiz(quiz_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_edit")
     if resp:
         return resp
 
@@ -2612,7 +3104,7 @@ def edit_quiz(quiz_id):
 
 @app.route("/admin/quizzes/<int:quiz_id>/toggle-onboarding", methods=["POST"])
 def toggle_quiz_onboarding(quiz_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_assign")
     if resp:
         return resp
 
@@ -2648,9 +3140,81 @@ def toggle_quiz_onboarding(quiz_id):
     return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
 
 
+@app.route("/admin/quizzes/<int:quiz_id>/lock/<int:employee_id>", methods=["POST"])
+def toggle_employee_quiz_lock(quiz_id, employee_id):
+    resp = require_permission("quizzes_lock")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    employee = db.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    if quiz is None or employee is None:
+        flash("Quiz or employee not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    existing = db.execute(
+        "SELECT id FROM quiz_locks WHERE quiz_id = ? AND employee_id = ?", (quiz_id, employee_id)
+    ).fetchone()
+    if existing:
+        db.execute("DELETE FROM quiz_locks WHERE id = ?", (existing["id"],))
+        flash(f"Unlocked \"{quiz['title']}\" for {employee['name']}.", "success")
+    else:
+        db.execute(
+            "INSERT INTO quiz_locks (quiz_id, employee_id) VALUES (?, ?)", (quiz_id, employee_id)
+        )
+        flash(f"Locked \"{quiz['title']}\" for {employee['name']}.", "success")
+    db.commit()
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/lock-all", methods=["POST"])
+def lock_quiz_for_all(quiz_id):
+    resp = require_permission("quizzes_lock")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    employees = db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
+    for emp in employees:
+        already = db.execute(
+            "SELECT 1 FROM quiz_locks WHERE quiz_id = ? AND employee_id = ?", (quiz_id, emp["id"])
+        ).fetchone()
+        if not already:
+            db.execute(
+                "INSERT INTO quiz_locks (quiz_id, employee_id) VALUES (?, ?)", (quiz_id, emp["id"])
+            )
+    db.commit()
+    flash(f'"{quiz["title"]}" locked for everyone.', "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
+@app.route("/admin/quizzes/<int:quiz_id>/unlock-all", methods=["POST"])
+def unlock_quiz_for_all(quiz_id):
+    resp = require_permission("quizzes_lock")
+    if resp:
+        return resp
+
+    db = get_db()
+    quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+    if quiz is None:
+        flash("Quiz not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    db.execute("DELETE FROM quiz_locks WHERE quiz_id = ?", (quiz_id,))
+    db.commit()
+    flash(f'"{quiz["title"]}" unlocked for everyone.', "success")
+    return redirect(url_for("quiz_detail_admin", quiz_id=quiz_id))
+
+
 @app.route("/admin/quizzes/<int:quiz_id>/assign", methods=["POST"])
 def assign_quiz(quiz_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_assign")
     if resp:
         return resp
 
@@ -2689,7 +3253,7 @@ def assign_quiz(quiz_id):
 
 @app.route("/admin/quizzes/<int:quiz_id>/delete", methods=["POST"])
 def delete_quiz(quiz_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_delete")
     if resp:
         return resp
 
@@ -2712,7 +3276,7 @@ def delete_quiz(quiz_id):
 
 @app.route("/admin/quizzes/<int:quiz_id>/questions", methods=["POST"])
 def add_quiz_question(quiz_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_edit")
     if resp:
         return resp
 
@@ -2768,7 +3332,7 @@ def add_quiz_question(quiz_id):
 
 @app.route("/admin/quizzes/questions/<int:question_id>/edit", methods=["POST"])
 def edit_quiz_question(question_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_edit")
     if resp:
         return resp
 
@@ -2824,7 +3388,7 @@ def edit_quiz_question(question_id):
 
 @app.route("/admin/quizzes/questions/<int:question_id>/delete", methods=["POST"])
 def delete_quiz_question(question_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_edit")
     if resp:
         return resp
 
@@ -2845,7 +3409,7 @@ def delete_quiz_question(question_id):
 
 @app.route("/admin/quizzes/<int:quiz_id>/results")
 def quiz_results(quiz_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_results_view")
     if resp:
         return resp
 
@@ -2877,7 +3441,7 @@ def quiz_results(quiz_id):
 
 @app.route("/admin/quizzes/attempts/<int:attempt_id>")
 def quiz_attempt_detail(attempt_id):
-    resp = require_permission("manage_quizzes")
+    resp = require_permission("quizzes_results_view")
     if resp:
         return resp
 
@@ -2952,6 +3516,58 @@ def quiz_attempt_detail(attempt_id):
     )
 
 
+@app.route("/admin/quizzes/attempts/<int:attempt_id>/edit", methods=["POST"])
+def edit_quiz_attempt(attempt_id):
+    resp = require_permission("quizzes_results_edit")
+    if resp:
+        return resp
+
+    db = get_db()
+    attempt = db.execute("SELECT * FROM quiz_attempts WHERE id = ?", (attempt_id,)).fetchone()
+    if attempt is None:
+        flash("Attempt not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    try:
+        total = max(1, int(request.form.get("total", attempt["total"])))
+        score = max(0, min(total, int(request.form.get("score", attempt["score"]))))
+    except ValueError:
+        flash("Score and total must be numbers.", "error")
+        return redirect(url_for("quiz_attempt_detail", attempt_id=attempt_id))
+    passed = 1 if request.form.get("passed") == "on" else 0
+
+    db.execute(
+        "UPDATE quiz_attempts SET score = ?, total = ?, passed = ? WHERE id = ?",
+        (score, total, passed, attempt_id),
+    )
+    sync_quiz_checklist_step(db, attempt["employee_id"], attempt["quiz_id"])
+    db.commit()
+    flash("Attempt updated.", "success")
+    return redirect(url_for("quiz_attempt_detail", attempt_id=attempt_id))
+
+
+@app.route("/admin/quizzes/attempts/<int:attempt_id>/delete", methods=["POST"])
+def delete_quiz_attempt(attempt_id):
+    resp = require_permission("quizzes_results_edit")
+    if resp:
+        return resp
+
+    db = get_db()
+    attempt = db.execute("SELECT * FROM quiz_attempts WHERE id = ?", (attempt_id,)).fetchone()
+    if attempt is None:
+        flash("Attempt not found.", "error")
+        return redirect(url_for("admin_quizzes"))
+
+    quiz_id = attempt["quiz_id"]
+    employee_id = attempt["employee_id"]
+    db.execute("DELETE FROM quiz_attempt_answers WHERE attempt_id = ?", (attempt_id,))
+    db.execute("DELETE FROM quiz_attempts WHERE id = ?", (attempt_id,))
+    sync_quiz_checklist_step(db, employee_id, quiz_id)
+    db.commit()
+    flash("Attempt deleted.", "success")
+    return redirect(url_for("quiz_results", quiz_id=quiz_id))
+
+
 @app.route("/employee/quizzes")
 def employee_quizzes():
     resp = require_login()
@@ -2970,8 +3586,14 @@ def employee_quizzes():
                ORDER BY score DESC, submitted_at DESC LIMIT 1""",
             (quiz["id"], session["user_id"]),
         ).fetchone()
+        locked = is_quiz_locked_for(db, quiz["id"], session["user_id"])
         quiz_rows.append(
-            {"quiz": quiz, "question_count": question_count, "best_attempt": best_attempt}
+            {
+                "quiz": quiz,
+                "question_count": question_count,
+                "best_attempt": best_attempt,
+                "locked": locked,
+            }
         )
 
     return render_template("employee_quizzes.html", quiz_rows=quiz_rows)
@@ -2987,6 +3609,11 @@ def take_quiz(quiz_id):
     quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
     if quiz is None:
         flash("Quiz not found.", "error")
+        return redirect(url_for("employee_quizzes"))
+    if is_quiz_locked_for(db, quiz_id, session["user_id"]) and not has_permission(
+        db, session.get("role"), "manage_quizzes"
+    ):
+        flash("This quiz is locked for you right now. Check back once it's opened up.", "error")
         return redirect(url_for("employee_quizzes"))
 
     questions = db.execute(
@@ -3022,6 +3649,11 @@ def submit_quiz(quiz_id):
     quiz = db.execute("SELECT * FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
     if quiz is None:
         flash("Quiz not found.", "error")
+        return redirect(url_for("employee_quizzes"))
+    if is_quiz_locked_for(db, quiz_id, session["user_id"]) and not has_permission(
+        db, session.get("role"), "manage_quizzes"
+    ):
+        flash("This quiz is locked for you right now. Check back once it's opened up.", "error")
         return redirect(url_for("employee_quizzes"))
 
     questions = db.execute(
@@ -3184,7 +3816,7 @@ def submit_quiz(quiz_id):
 
 @app.route("/admin/settings/master-checklist", methods=["GET", "POST"])
 def master_checklist_settings():
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_master")
     if resp:
         return resp
 
@@ -3232,7 +3864,7 @@ def master_checklist_settings():
 
 @app.route("/admin/settings/master-checklist/<int:item_id>/edit", methods=["POST"])
 def edit_master_checklist_item(item_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_master")
     if resp:
         return resp
 
@@ -3262,7 +3894,7 @@ def edit_master_checklist_item(item_id):
 
 @app.route("/admin/settings/master-checklist/<int:item_id>/delete", methods=["POST"])
 def delete_master_checklist_item(item_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_master")
     if resp:
         return resp
 
@@ -3284,6 +3916,40 @@ def delete_master_checklist_item(item_id):
     return redirect(url_for("master_checklist_settings"))
 
 
+@app.route("/admin/settings/step-order", methods=["GET", "POST"])
+def step_order_settings():
+    resp = require_permission("checklists_order")
+    if resp:
+        return resp
+
+    db = get_db()
+
+    if request.method == "POST":
+        ranked = []
+        for step_type in DEFAULT_STEP_TYPE_PRIORITY:
+            try:
+                rank = int(request.form.get(f"rank_{step_type}", 999))
+            except ValueError:
+                rank = 999
+            ranked.append((rank, DEFAULT_STEP_TYPE_PRIORITY.index(step_type), step_type))
+        ranked.sort(key=lambda x: (x[0], x[1]))
+        order = [step_type for _, _, step_type in ranked]
+
+        db.execute(
+            """INSERT INTO portal_settings (key, value) VALUES ('step_type_priority', ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+            (json.dumps(order),),
+        )
+        db.commit()
+        flash("Checklist order updated.", "success")
+        return redirect(url_for("step_order_settings"))
+
+    current_order = get_step_type_priority(db)
+    return render_template(
+        "step_order_settings.html", current_order=current_order, labels=STEP_TYPE_LABELS
+    )
+
+
 # ---------------------------------------------------------------------------
 # Settings / onboarding checklist templates (job-specific onboarding)
 # ---------------------------------------------------------------------------
@@ -3296,42 +3962,173 @@ def settings_home():
     return render_template("settings.html")
 
 
-@app.route("/admin/settings/role-permissions", methods=["GET", "POST"])
-def role_permissions_settings():
-    resp = require_admin()
-    if resp:
-        return resp
-
+def render_role_permissions_page(role_name):
+    """Shared permissions editor for Manager, Employee, and every custom
+    access level — same UI, different role name. Admin is never edited here
+    since it always has full access."""
     db = get_db()
 
     if request.method == "POST":
         selected = {
             key for key in request.form.getlist("permissions") if key in PERMISSION_KEYS
         }
-        db.execute("DELETE FROM role_permissions WHERE role = 'Manager'")
+        db.execute("DELETE FROM role_permissions WHERE role = ?", (role_name,))
         for key in selected:
             db.execute(
-                "INSERT INTO role_permissions (role, permission) VALUES ('Manager', ?)", (key,)
+                "INSERT INTO role_permissions (role, permission) VALUES (?, ?)", (role_name, key)
             )
         db.commit()
-        flash("Role permissions updated.", "success")
-        return redirect(url_for("role_permissions_settings"))
+        flash(f"{role_name} permissions updated.", "success")
+        return redirect(url_for(request.endpoint, **request.view_args))
 
-    manager_permissions = {
+    granted_permissions = {
         row["permission"]
         for row in db.execute(
-            "SELECT permission FROM role_permissions WHERE role = 'Manager'"
+            "SELECT permission FROM role_permissions WHERE role = ?", (role_name,)
         ).fetchall()
     }
 
     return render_template(
-        "role_permissions.html", permissions=PERMISSIONS, manager_permissions=manager_permissions
+        "role_permissions.html",
+        role_name=role_name,
+        permission_categories=PERMISSION_CATEGORIES,
+        manager_permissions=granted_permissions,
     )
+
+
+@app.route("/admin/settings/permissions/<role_name>", methods=["GET", "POST"])
+def edit_role_permissions(role_name):
+    resp = require_admin()
+    if resp:
+        return resp
+
+    db = get_db()
+    if role_name == "Admin" or role_name not in get_all_roles(db):
+        flash("That role can't be edited here.", "error")
+        return redirect(url_for("access_levels_list"))
+
+    return render_role_permissions_page(role_name)
+
+
+@app.route("/admin/settings/role-permissions")
+def role_permissions_settings():
+    # Kept so any old bookmarks/links still work — Manager now lives in the
+    # same unified Access Levels list as everything else.
+    resp = require_admin()
+    if resp:
+        return resp
+    return redirect(url_for("edit_role_permissions", role_name="Manager"))
+
+
+@app.route("/admin/settings/access-levels")
+def access_levels_list():
+    resp = require_admin()
+    if resp:
+        return resp
+
+    db = get_db()
+
+    def role_summary(name, description, built_in):
+        return {
+            "name": name,
+            "description": description,
+            "built_in": built_in,
+            "employee_count": db.execute(
+                "SELECT COUNT(*) FROM employees WHERE role = ?", (name,)
+            ).fetchone()[0],
+            "permission_count": db.execute(
+                "SELECT COUNT(*) FROM role_permissions WHERE role = ?", (name,)
+            ).fetchone()[0],
+        }
+
+    built_in_rows = [
+        role_summary(
+            "Manager",
+            "Sees the full admin portal, scoped to whatever's granted below.",
+            True,
+        ),
+        role_summary(
+            "Employee",
+            "The standard employee experience by default — grant permissions here to also give employees specific admin-side capabilities.",
+            True,
+        ),
+    ]
+
+    custom_rows = [
+        role_summary(role["name"], role["description"], False)
+        for role in db.execute("SELECT * FROM custom_roles ORDER BY name").fetchall()
+    ]
+
+    return render_template(
+        "access_levels.html", built_in_rows=built_in_rows, custom_rows=custom_rows
+    )
+
+
+@app.route("/admin/settings/access-levels/create", methods=["POST"])
+def create_access_level():
+    resp = require_admin()
+    if resp:
+        return resp
+
+    db = get_db()
+    name = request.form.get("name", "").strip()
+    description = request.form.get("description", "").strip()
+
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("access_levels_list"))
+    if name in ("Admin", "Manager", "Employee"):
+        flash(f'"{name}" is already a built-in role — choose a different name.', "error")
+        return redirect(url_for("access_levels_list"))
+
+    existing = db.execute("SELECT 1 FROM custom_roles WHERE name = ?", (name,)).fetchone()
+    if existing:
+        flash("An access level with that name already exists.", "error")
+        return redirect(url_for("access_levels_list"))
+
+    db.execute(
+        "INSERT INTO custom_roles (name, description) VALUES (?, ?)", (name, description)
+    )
+    db.commit()
+    flash(f'"{name}" created. Set its permissions below.', "success")
+    return redirect(url_for("edit_role_permissions", role_name=name))
+
+
+@app.route("/admin/settings/access-levels/<role_name>/delete", methods=["POST"])
+def delete_access_level(role_name):
+    resp = require_admin()
+    if resp:
+        return resp
+
+    confirm = request.form.get("confirm", "").strip().lower()
+    if confirm != "delete":
+        flash('You must type "delete" to confirm.', "error")
+        return redirect(url_for("access_levels_list"))
+
+    db = get_db()
+    role = db.execute("SELECT * FROM custom_roles WHERE name = ?", (role_name,)).fetchone()
+    if role is None:
+        flash("Access level not found.", "error")
+        return redirect(url_for("access_levels_list"))
+
+    # Anyone currently on this access level falls back to the plain Employee
+    # role rather than being left with an undefined/dangling role.
+    reassigned = db.execute(
+        "SELECT COUNT(*) FROM employees WHERE role = ?", (role_name,)
+    ).fetchone()[0]
+    db.execute("UPDATE employees SET role = 'Employee' WHERE role = ?", (role_name,))
+    db.execute("DELETE FROM role_permissions WHERE role = ?", (role_name,))
+    db.execute("DELETE FROM custom_roles WHERE id = ?", (role["id"],))
+    db.commit()
+
+    note = f" {reassigned} employee(s) were moved to the Employee role." if reassigned else ""
+    flash(f'"{role_name}" deleted.{note}', "success")
+    return redirect(url_for("access_levels_list"))
 
 
 @app.route("/admin/settings/signup-page", methods=["GET", "POST"])
 def onboarding_page_settings():
-    resp = require_permission("manage_settings")
+    resp = require_permission("settings_signup_page")
     if resp:
         return resp
 
@@ -3384,7 +4181,7 @@ def onboarding_templates_list():
 
 @app.route("/admin/settings/onboarding-templates/create", methods=["GET", "POST"])
 def add_onboarding_template():
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_templates")
     if resp:
         return resp
 
@@ -3422,10 +4219,17 @@ def onboarding_template_detail(template_id):
         flash("Onboarding checklist not found.", "error")
         return redirect(url_for("onboarding_templates_list"))
 
-    items = db.execute(
+    raw_items = db.execute(
         "SELECT * FROM onboarding_template_items WHERE template_id = ? ORDER BY sort_order, id",
         (template_id,),
     ).fetchall()
+    items = []
+    for item in raw_items:
+        item_dict = dict(item)
+        item_dict["step_name"] = resolve_checklist_display_name(
+            db, item["step_type"], item["related_id"], item["step_name"]
+        )
+        items.append(item_dict)
     documents = db.execute("SELECT * FROM documents ORDER BY title").fetchall()
     modules = db.execute("SELECT * FROM training_modules ORDER BY title").fetchall()
     quizzes = db.execute("SELECT * FROM quizzes ORDER BY title").fetchall()
@@ -3444,9 +4248,38 @@ def onboarding_template_detail(template_id):
     )
 
 
+@app.route("/admin/settings/onboarding-templates/<int:template_id>/edit", methods=["POST"])
+def edit_onboarding_template(template_id):
+    resp = require_permission("checklists_templates")
+    if resp:
+        return resp
+
+    db = get_db()
+    template = db.execute(
+        "SELECT id FROM onboarding_templates WHERE id = ?", (template_id,)
+    ).fetchone()
+    if template is None:
+        flash("Onboarding checklist not found.", "error")
+        return redirect(url_for("onboarding_templates_list"))
+
+    name = request.form.get("name", "").strip()
+    description = request.form.get("description", "").strip()
+    if not name:
+        flash("Name is required.", "error")
+        return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
+    db.execute(
+        "UPDATE onboarding_templates SET name = ?, description = ? WHERE id = ?",
+        (name, description, template_id),
+    )
+    db.commit()
+    flash("Checklist updated.", "success")
+    return redirect(url_for("onboarding_template_detail", template_id=template_id))
+
+
 @app.route("/admin/settings/onboarding-templates/<int:template_id>/items/task", methods=["POST"])
 def add_template_task_item(template_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3479,7 +4312,7 @@ def add_template_task_item(template_id):
 
 @app.route("/admin/settings/onboarding-templates/<int:template_id>/items/document", methods=["POST"])
 def add_template_document_item(template_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3536,7 +4369,7 @@ def add_template_document_item(template_id):
 
 @app.route("/admin/settings/onboarding-templates/<int:template_id>/items/training", methods=["POST"])
 def add_template_training_item(template_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3591,7 +4424,7 @@ def add_template_training_item(template_id):
 
 @app.route("/admin/settings/onboarding-templates/<int:template_id>/items/quiz", methods=["POST"])
 def add_template_quiz_item(template_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3646,7 +4479,7 @@ def add_template_quiz_item(template_id):
 
 @app.route("/admin/settings/onboarding-templates/items/<int:item_id>/edit", methods=["POST"])
 def edit_template_task_item(item_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3667,18 +4500,25 @@ def edit_template_task_item(item_id):
         flash("Please describe the task.", "error")
         return redirect(url_for("onboarding_template_detail", template_id=item["template_id"]))
 
+    old_name = item["step_name"]
     db.execute(
         "UPDATE onboarding_template_items SET step_name = ? WHERE id = ?",
         (step_name, item_id),
     )
+    # Keep already-assigned employees' checklists in sync with the rename,
+    # same as editing a master checklist task does.
+    db.execute(
+        "UPDATE onboarding_steps SET step_name = ? WHERE step_type = 'task' AND step_name = ?",
+        (step_name, old_name),
+    )
     db.commit()
-    flash("Task updated.", "success")
+    flash("Task updated (including on every employee's checklist).", "success")
     return redirect(url_for("onboarding_template_detail", template_id=item["template_id"]))
 
 
 @app.route("/admin/settings/onboarding-templates/items/<int:item_id>/delete", methods=["POST"])
 def delete_template_item(item_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3699,7 +4539,7 @@ def delete_template_item(item_id):
 
 @app.route("/admin/settings/onboarding-templates/<int:template_id>/delete", methods=["POST"])
 def delete_onboarding_template(template_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_templates")
     if resp:
         return resp
 
@@ -3723,7 +4563,7 @@ def delete_onboarding_template(template_id):
 
 @app.route("/admin/training/<int:module_id>/checklists", methods=["POST"])
 def update_module_checklists(module_id):
-    resp = require_permission("manage_onboarding_checklists")
+    resp = require_permission("checklists_items")
     if resp:
         return resp
 
@@ -3759,6 +4599,308 @@ def update_module_checklists(module_id):
     db.commit()
     flash("Onboarding checklist membership updated.", "success")
     return redirect(url_for("training_detail_admin", module_id=module_id) + "#onboarding")
+
+
+# ---------------------------------------------------------------------------
+# Audit log viewer (Admin-only)
+# ---------------------------------------------------------------------------
+
+AUDIT_PAGE_SIZE = 50
+
+
+@app.route("/admin/audit")
+def audit_log_list():
+    resp = require_admin()
+    if resp:
+        return resp
+
+    db = get_db()
+    q = request.args.get("q", "").strip()
+    actor_id = request.args.get("actor_id", "").strip()
+    action_type = request.args.get("action_type", "").strip()
+    endpoint = request.args.get("endpoint", "").strip()
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+
+    where = []
+    params = []
+    if q:
+        like = f"%{q}%"
+        where.append(
+            "(action_label LIKE ? OR entity_summary LIKE ? OR path LIKE ? OR actor_name LIKE ? OR details LIKE ?)"
+        )
+        params.extend([like, like, like, like, like])
+    if actor_id:
+        where.append("actor_id = ?")
+        params.append(actor_id)
+    if action_type in ("view", "change"):
+        where.append("action_type = ?")
+        params.append(action_type)
+    if endpoint:
+        where.append("endpoint = ?")
+        params.append(endpoint)
+    if date_from:
+        where.append("created_at >= ?")
+        params.append(date_from)
+    if date_to:
+        where.append("created_at <= ?")
+        params.append(date_to + " 23:59:59")
+
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+    total = db.execute(f"SELECT COUNT(*) FROM audit_log {where_sql}", params).fetchone()[0]
+    total_pages = max(1, (total + AUDIT_PAGE_SIZE - 1) // AUDIT_PAGE_SIZE)
+    page = min(page, total_pages)
+    offset = (page - 1) * AUDIT_PAGE_SIZE
+
+    entries = db.execute(
+        f"""SELECT * FROM audit_log {where_sql}
+            ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?""",
+        params + [AUDIT_PAGE_SIZE, offset],
+    ).fetchall()
+
+    actors = db.execute(
+        """SELECT DISTINCT actor_id, actor_name FROM audit_log
+           WHERE actor_id IS NOT NULL ORDER BY actor_name"""
+    ).fetchall()
+    endpoints = db.execute(
+        "SELECT DISTINCT endpoint FROM audit_log WHERE endpoint IS NOT NULL ORDER BY endpoint"
+    ).fetchall()
+
+    return render_template(
+        "audit_log.html",
+        entries=entries,
+        total=total,
+        page=page,
+        total_pages=total_pages,
+        q=q,
+        actor_id=actor_id,
+        action_type=action_type,
+        endpoint=endpoint,
+        date_from=date_from,
+        date_to=date_to,
+        actors=actors,
+        endpoints=endpoints,
+    )
+
+
+@app.route("/admin/audit/<int:log_id>")
+def audit_log_detail(log_id):
+    resp = require_admin()
+    if resp:
+        return resp
+
+    db = get_db()
+    entry = db.execute("SELECT * FROM audit_log WHERE id = ?", (log_id,)).fetchone()
+    if entry is None:
+        flash("Audit log entry not found.", "error")
+        return redirect(url_for("audit_log_list"))
+
+    try:
+        details = json.loads(entry["details"]) if entry["details"] else {}
+    except (ValueError, TypeError):
+        details = {}
+
+    return render_template("audit_log_detail.html", entry=entry, details=details)
+
+
+# ---------------------------------------------------------------------------
+# Reports (customizable, exportable views across employees/checklist/quizzes)
+# ---------------------------------------------------------------------------
+
+REPORT_LABELS = {
+    "employees": "Employee Directory",
+    "checklist": "Checklist Status",
+    "quizzes": "Quiz Results",
+}
+
+REPORT_COLUMNS = {
+    "employees": [
+        ("name", "Name"), ("email", "Email"), ("username", "Username"), ("role", "Role"),
+        ("job_title", "Job Title"), ("department", "Department"), ("hire_date", "Hire Date"),
+        ("status", "Status"), ("phone", "Phone"), ("emergency_contact_name", "Emergency Contact"),
+        ("emergency_contact_phone", "Emergency Contact Phone"), ("date_of_birth", "Date of Birth"),
+        ("onboarding_pct", "Onboarding %"), ("training_pct", "Training %"), ("created_at", "Added On"),
+    ],
+    "checklist": [
+        ("employee_name", "Employee"), ("step_name", "Checklist Item"), ("step_type", "Type"),
+        ("status", "Status"), ("completed_at", "Completed At"),
+    ],
+    "quizzes": [
+        ("employee_name", "Employee"), ("quiz_title", "Quiz"), ("score", "Score"),
+        ("total", "Total Questions"), ("pct", "Percent"), ("passed", "Passed"),
+        ("submitted_at", "Submitted At"),
+    ],
+}
+
+
+def get_report_rows(db, report_type, args):
+    if report_type == "employees":
+        query = "SELECT * FROM employees WHERE 1=1"
+        params = []
+        role_filter = args.get("role", "")
+        status_filter = args.get("status", "")
+        if role_filter:
+            query += " AND role = ?"
+            params.append(role_filter)
+        if status_filter:
+            query += " AND status = ?"
+            params.append(status_filter)
+        query += " ORDER BY name"
+        employees = db.execute(query, params).fetchall()
+        rows = []
+        for emp in employees:
+            row = dict(emp)
+            _, _, _, onboarding_pct = onboarding_progress(db, emp["id"])
+            _, _, _, training_pct = training_progress(db, emp["id"])
+            row["onboarding_pct"] = onboarding_pct
+            row["training_pct"] = training_pct
+            rows.append(row)
+        return rows
+
+    if report_type == "checklist":
+        query = """SELECT onboarding_steps.*, employees.name AS employee_name
+                   FROM onboarding_steps JOIN employees ON employees.id = onboarding_steps.employee_id
+                   WHERE 1=1"""
+        params = []
+        step_type_filter = args.get("step_type", "")
+        status_filter = args.get("status", "")
+        employee_filter = args.get("employee_id", "")
+        if step_type_filter:
+            query += " AND onboarding_steps.step_type = ?"
+            params.append(step_type_filter)
+        if status_filter == "complete":
+            query += " AND onboarding_steps.completed_at IS NOT NULL"
+        elif status_filter == "pending":
+            query += " AND onboarding_steps.completed_at IS NULL"
+        if employee_filter:
+            query += " AND onboarding_steps.employee_id = ?"
+            params.append(employee_filter)
+        query += " ORDER BY employees.name, onboarding_steps.id"
+        steps = db.execute(query, params).fetchall()
+        rows = []
+        for step in steps:
+            rows.append(
+                {
+                    "employee_name": step["employee_name"],
+                    "step_name": resolve_checklist_display_name(
+                        db, step["step_type"], step["related_id"], step["step_name"]
+                    ),
+                    "step_type": step["step_type"],
+                    "status": "Complete" if step["completed_at"] else "Pending",
+                    "completed_at": step["completed_at"] or "",
+                }
+            )
+        return rows
+
+    if report_type == "quizzes":
+        query = """SELECT quiz_attempts.*, employees.name AS employee_name, quizzes.title AS quiz_title
+                   FROM quiz_attempts
+                   JOIN employees ON employees.id = quiz_attempts.employee_id
+                   JOIN quizzes ON quizzes.id = quiz_attempts.quiz_id
+                   WHERE 1=1"""
+        params = []
+        quiz_filter = args.get("quiz_id", "")
+        passed_filter = args.get("passed", "")
+        if quiz_filter:
+            query += " AND quiz_attempts.quiz_id = ?"
+            params.append(quiz_filter)
+        if passed_filter == "passed":
+            query += " AND quiz_attempts.passed = 1"
+        elif passed_filter == "failed":
+            query += " AND quiz_attempts.passed = 0"
+        query += " ORDER BY quiz_attempts.submitted_at DESC"
+        attempts = db.execute(query, params).fetchall()
+        rows = []
+        for a in attempts:
+            pct = round((a["score"] / a["total"]) * 100) if a["total"] else 0
+            rows.append(
+                {
+                    "employee_name": a["employee_name"],
+                    "quiz_title": a["quiz_title"],
+                    "score": a["score"],
+                    "total": a["total"],
+                    "pct": pct,
+                    "passed": "Yes" if a["passed"] else "No",
+                    "submitted_at": a["submitted_at"],
+                }
+            )
+        return rows
+
+    return []
+
+
+def selected_report_columns(report_type, args):
+    all_columns = REPORT_COLUMNS.get(report_type, [])
+    selected_keys = args.getlist("columns")
+    if not selected_keys:
+        return all_columns
+    return [c for c in all_columns if c[0] in selected_keys]
+
+
+@app.route("/admin/reports")
+def reports_home():
+    resp = require_permission("reports_view")
+    if resp:
+        return resp
+
+    db = get_db()
+    report_type = request.args.get("report_type", "")
+    columns = []
+    rows = []
+    if report_type in REPORT_COLUMNS:
+        columns = selected_report_columns(report_type, request.args)
+        rows = get_report_rows(db, report_type, request.args)
+
+    employees_list = db.execute(
+        "SELECT id, name FROM employees ORDER BY name"
+    ).fetchall()
+    quizzes_list = db.execute("SELECT id, title FROM quizzes ORDER BY title").fetchall()
+
+    return render_template(
+        "reports.html",
+        report_labels=REPORT_LABELS,
+        report_columns=REPORT_COLUMNS,
+        report_type=report_type,
+        columns=columns,
+        rows=rows,
+        employees_list=employees_list,
+        quizzes_list=quizzes_list,
+        args=request.args,
+    )
+
+
+@app.route("/admin/reports/export")
+def reports_export():
+    resp = require_permission("reports_view")
+    if resp:
+        return resp
+
+    db = get_db()
+    report_type = request.args.get("report_type", "")
+    if report_type not in REPORT_COLUMNS:
+        flash("Choose a report type first.", "error")
+        return redirect(url_for("reports_home"))
+
+    columns = selected_report_columns(report_type, request.args)
+    rows = get_report_rows(db, report_type, request.args)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow([label for _, label in columns])
+    for row in rows:
+        writer.writerow([row.get(key, "") for key, _ in columns])
+
+    filename = f"{report_type}-report-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.csv"
+    return Response(
+        buffer.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 # ---------------------------------------------------------------------------

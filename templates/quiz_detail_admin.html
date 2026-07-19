@@ -7,14 +7,14 @@
     <p class="page-subtitle">{{ quiz.description or 'No description.' }}</p>
   </div>
   <div class="btn-row">
-    {% if can('manage_quizzes') %}
+    {% if can('quizzes_results_view') %}
     <a class="btn btn-secondary" href="{{ url_for('quiz_results', quiz_id=quiz.id) }}">Results ({{ attempt_count }})</a>
     {% endif %}
     <a class="btn btn-secondary" href="{{ url_for('admin_quizzes') }}">Back to Quizzes</a>
   </div>
 </div>
 
-{% if can('manage_quizzes') %}
+{% if can('quizzes_edit') %}
 <div class="card" style="max-width:640px;">
   <h3>Quiz Details</h3>
   <form method="post" action="{{ url_for('edit_quiz', quiz_id=quiz.id) }}">
@@ -42,7 +42,9 @@
     <button type="submit" class="btn btn-secondary">Save Details</button>
   </form>
 </div>
+{% endif %}
 
+{% if can('quizzes_assign') %}
 <div class="card-grid" style="max-width:900px;">
   <div class="card">
     <h3>Assign to Everyone</h3>
@@ -75,6 +77,36 @@
 </div>
 {% endif %}
 
+{% if can('quizzes_lock') %}
+<div class="card">
+  <h3>Lock Per Employee</h3>
+  <p class="form-hint">Locking is per employee, not the whole quiz — lock it for specific people while leaving it open for everyone else, or use the buttons below to lock/unlock it for everyone at once.</p>
+  <div class="btn-row" style="margin-bottom:1rem;">
+    <form method="post" action="{{ url_for('lock_quiz_for_all', quiz_id=quiz.id) }}">
+      <button type="submit" class="btn btn-secondary btn-small">🔒 Lock for Everyone</button>
+    </form>
+    <form method="post" action="{{ url_for('unlock_quiz_for_all', quiz_id=quiz.id) }}">
+      <button type="submit" class="btn btn-secondary btn-small">🔓 Unlock for Everyone</button>
+    </form>
+  </div>
+  {% for row in lock_rows %}
+    <div class="list-item">
+      <div class="list-item-info">
+        <strong>{{ row.employee.name }}</strong>
+        <span>{% if row.locked %}Locked out of this quiz{% else %}Can take this quiz{% endif %}</span>
+      </div>
+      <form method="post" action="{{ url_for('toggle_employee_quiz_lock', quiz_id=quiz.id, employee_id=row.employee.id) }}">
+        <button type="submit" class="btn {% if row.locked %}btn-primary{% else %}btn-secondary{% endif %} btn-small">
+          {% if row.locked %}🔓 Unlock{% else %}🔒 Lock{% endif %}
+        </button>
+      </form>
+    </div>
+  {% else %}
+    <p class="empty-state">No employees yet.</p>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="card">
   <h3>Questions ({{ question_rows|length }})</h3>
   {% for row in question_rows %}
@@ -98,13 +130,13 @@
             {% endif %}
           </span>
         </div>
-        {% if can('manage_quizzes') %}
+        {% if can('quizzes_edit') %}
         <form method="post" action="{{ url_for('delete_quiz_question', question_id=row.question.id) }}" onsubmit="return confirm('Remove this question?');">
           <button type="submit" class="btn btn-danger btn-small">Remove</button>
         </form>
         {% endif %}
       </div>
-      {% if can('manage_quizzes') %}
+      {% if can('quizzes_edit') %}
       <details style="margin-top:0.75rem;">
         <summary class="btn btn-secondary btn-small" style="display:inline-block;">Edit Question</summary>
         <form method="post" action="{{ url_for('edit_quiz_question', question_id=row.question.id) }}" class="qform" style="margin-top:0.75rem;">
@@ -184,7 +216,7 @@
   {% endfor %}
 </div>
 
-{% if can('manage_quizzes') %}
+{% if can('quizzes_edit') %}
 <div class="card qform" style="max-width:640px;">
   <h3>Add a Question</h3>
   <form method="post" action="{{ url_for('add_quiz_question', quiz_id=quiz.id) }}">
@@ -238,7 +270,9 @@
     <button type="submit" class="btn btn-primary">Add Question</button>
   </form>
 </div>
+{% endif %}
 
+{% if can('quizzes_delete') %}
 <div class="card confirm-box">
   <p>Deleting this quiz removes all its questions, checklist entries, and every employee's results.</p>
   <form method="post" action="{{ url_for('delete_quiz', quiz_id=quiz.id) }}">

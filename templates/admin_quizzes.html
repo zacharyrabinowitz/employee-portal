@@ -6,7 +6,7 @@
     <h1>Quizzes</h1>
     <p class="page-subtitle">Create quizzes, add questions, and review employee results.</p>
   </div>
-  {% if can('manage_quizzes') %}
+  {% if can('quizzes_create') %}
   <a class="btn btn-primary" href="{{ url_for('create_quiz') }}">+ Create Quiz</a>
   {% endif %}
 </div>
@@ -25,8 +25,10 @@
         </span>
       </div>
       <div class="btn-row">
-        {% if can('manage_quizzes') %}
+        {% if can('quizzes_results_view') %}
         <a class="btn btn-secondary btn-small" href="{{ url_for('quiz_results', quiz_id=row.quiz.id) }}">Results</a>
+        {% endif %}
+        {% if can('quizzes_edit') %}
         <a class="btn btn-secondary btn-small" href="{{ url_for('quiz_detail_admin', quiz_id=row.quiz.id) }}">Manage</a>
         {% else %}
         <a class="btn btn-secondary btn-small" href="{{ url_for('quiz_detail_admin', quiz_id=row.quiz.id) }}">View</a>

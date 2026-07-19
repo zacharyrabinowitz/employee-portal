@@ -10,6 +10,25 @@ import sqlite3
 DB_PATH = "portal.db"
 TRAINING_SLIDES_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads", "training_slides")
 
+# Old broad manage_* permissions were split into specific per-action ones.
+# Any Manager who already had the broad permission gets every new permission
+# it was split into, so upgrading never silently takes access away.
+OLD_TO_NEW_PERMISSIONS = {
+    "manage_employees": ["employees_add", "employees_edit", "employees_notes", "employees_checklist"],
+    "manage_documents": ["documents_create", "documents_edit", "documents_delete", "documents_signatures"],
+    "manage_training": [
+        "training_create", "training_edit", "training_delete", "training_slides", "training_assign",
+    ],
+    "manage_quizzes": [
+        "quizzes_create", "quizzes_edit", "quizzes_delete", "quizzes_assign", "quizzes_lock",
+        "quizzes_results_view", "quizzes_results_edit",
+    ],
+    "manage_onboarding_checklists": [
+        "checklists_templates", "checklists_items", "checklists_master", "checklists_order",
+    ],
+    "manage_settings": ["settings_signup_page"],
+}
+
 
 def column_exists(conn, table, column):
     cols = [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
@@ -272,6 +291,76 @@ def migrate():
     if not column_exists(conn, "quiz_choices", "match_text"):
         conn.execute("ALTER TABLE quiz_choices ADD COLUMN match_text TEXT")
         print("Added quiz_choices.match_text (for matching-type questions)")
+
+    if not table_exists(conn, "audit_log"):
+        conn.execute(
+            """CREATE TABLE audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                actor_id INTEGER,
+                actor_name TEXT,
+                actor_role TEXT,
+                method TEXT NOT NULL,
+                path TEXT NOT NULL,
+                endpoint TEXT,
+                action_label TEXT,
+                action_type TEXT NOT NULL,
+                status_code INTEGER,
+                entity_summary TEXT,
+                details TEXT
+            )"""
+        )
+        conn.execute("CREATE INDEX idx_audit_log_created_at ON audit_log(created_at)")
+        conn.execute("CREATE INDEX idx_audit_log_actor_id ON audit_log(actor_id)")
+        conn.execute("CREATE INDEX idx_audit_log_action_type ON audit_log(action_type)")
+        print("Created audit_log table")
+
+    if not column_exists(conn, "quizzes", "is_locked"):
+        conn.execute("ALTER TABLE quizzes ADD COLUMN is_locked INTEGER NOT NULL DEFAULT 0")
+        print("Added quizzes.is_locked")
+
+    if not table_exists(conn, "quiz_locks"):
+        conn.execute(
+            """CREATE TABLE quiz_locks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quiz_id INTEGER NOT NULL REFERENCES quizzes(id),
+                employee_id INTEGER NOT NULL REFERENCES employees(id),
+                locked_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(quiz_id, employee_id)
+            )"""
+        )
+        print("Created quiz_locks table (per-employee quiz locking)")
+
+    if not table_exists(conn, "custom_roles"):
+        conn.execute(
+            """CREATE TABLE custom_roles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        print("Created custom_roles table (custom access levels)")
+
+    if table_exists(conn, "role_permissions"):
+        for old_key, new_keys in OLD_TO_NEW_PERMISSIONS.items():
+            had_old = conn.execute(
+                "SELECT 1 FROM role_permissions WHERE role = 'Manager' AND permission = ?", (old_key,)
+            ).fetchone()
+            if not had_old:
+                continue
+            for new_key in new_keys:
+                exists = conn.execute(
+                    "SELECT 1 FROM role_permissions WHERE role = 'Manager' AND permission = ?", (new_key,)
+                ).fetchone()
+                if not exists:
+                    conn.execute(
+                        "INSERT INTO role_permissions (role, permission) VALUES ('Manager', ?)", (new_key,)
+                    )
+            conn.execute(
+                "DELETE FROM role_permissions WHERE role = 'Manager' AND permission = ?", (old_key,)
+            )
+            print(f"Expanded Manager permission '{old_key}' into: {', '.join(new_keys)}")
 
     conn.commit()
     conn.close()

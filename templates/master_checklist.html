@@ -13,7 +13,7 @@
   <h3>Tasks</h3>
   {% for item in items %}
     <div class="list-item">
-      {% if can('manage_onboarding_checklists') %}
+      {% if can('checklists_master') %}
         <form method="post" action="{{ url_for('edit_master_checklist_item', item_id=item.id) }}" class="list-item-info" style="flex-direction:row; align-items:center; gap:0.5rem;">
           <input type="text" name="step_name" value="{{ item.step_name }}" required style="flex:1;">
           <button type="submit" class="btn btn-secondary btn-small">Save</button>
@@ -23,7 +23,7 @@
           <strong>{{ item.step_name }}</strong>
         </div>
       {% endif %}
-      {% if can('manage_onboarding_checklists') %}
+      {% if can('checklists_master') %}
       <form method="post" action="{{ url_for('delete_master_checklist_item', item_id=item.id) }}" onsubmit="return confirm('Remove this task from the master checklist and every employee\'s list?');">
         <button type="submit" class="btn btn-danger btn-small">Remove</button>
       </form>
@@ -34,7 +34,7 @@
   {% endfor %}
 </div>
 
-{% if can('manage_onboarding_checklists') %}
+{% if can('checklists_master') %}
 <div class="card" style="max-width:640px;">
   <h3>Add a Task</h3>
   <form method="post" action="{{ url_for('master_checklist_settings') }}">

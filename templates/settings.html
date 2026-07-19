@@ -9,13 +9,15 @@
 </div>
 
 <div class="card-grid">
-  {% if can('manage_onboarding_checklists') %}
+  {% if can('checklists_templates') %}
   <div class="card">
     <h3>Onboarding Checklists</h3>
     <p class="form-hint">Build custom onboarding checklists for different jobs — bundle documents, training modules, and tasks together, then assign the checklist when you add a new employee.</p>
     <a class="btn btn-primary btn-small" href="{{ url_for('onboarding_templates_list') }}">Manage Onboarding Checklists</a>
   </div>
+  {% endif %}
 
+  {% if can('checklists_master') %}
   <div class="card">
     <h3>Master Checklist</h3>
     <p class="form-hint">Manage the baseline tasks that get added to every employee's checklist automatically, no matter which job-specific checklist they're on.</p>
@@ -23,7 +25,15 @@
   </div>
   {% endif %}
 
-  {% if can('manage_settings') %}
+  {% if can('checklists_order') %}
+  <div class="card">
+    <h3>Checklist Order</h3>
+    <p class="form-hint">Control which kind of checklist item employees are pointed to first — this decides what shows up in the "Do This Next" card on their dashboard.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('step_order_settings') }}">Set Checklist Order</a>
+  </div>
+  {% endif %}
+
+  {% if can('settings_signup_page') %}
   <div class="card">
     <h3>Signup Page</h3>
     <p class="form-hint">Customize the heading, message, and button text new employees see when they click their onboarding link to activate their account.</p>
@@ -31,11 +41,19 @@
   </div>
   {% endif %}
 
+  {% if can('reports_view') %}
+  <div class="card">
+    <h3>Reports</h3>
+    <p class="form-hint">Build custom reports across employees, checklist status, and quiz results — pick your columns and filters, then export to CSV.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('reports_home') }}">View Reports</a>
+  </div>
+  {% endif %}
+
   {% if session.get('role') == 'Admin' %}
   <div class="card">
-    <h3>Role Permissions</h3>
-    <p class="form-hint">Control what the Manager role can see and do across the portal.</p>
-    <a class="btn btn-primary btn-small" href="{{ url_for('role_permissions_settings') }}">Manage Role Permissions</a>
+    <h3>Access Levels</h3>
+    <p class="form-hint">Manage exactly what Manager, Employee, and any custom role can see and do — all in one place.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('access_levels_list') }}">Manage Access Levels</a>
   </div>
 
   <div class="card">
@@ -45,6 +63,12 @@
       <a class="btn btn-primary btn-small" href="{{ url_for('export_data') }}">Export All Data</a>
       <a class="btn btn-secondary btn-small" href="{{ url_for('import_data') }}">Restore from Backup</a>
     </div>
+  </div>
+
+  <div class="card">
+    <h3>Audit Log</h3>
+    <p class="form-hint">See every change and page visit across the whole portal — who did what, when, and to what. Searchable and filterable.</p>
+    <a class="btn btn-primary btn-small" href="{{ url_for('audit_log_list') }}">View Audit Log</a>
   </div>
   {% endif %}
 </div>

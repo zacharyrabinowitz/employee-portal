@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Audit Entry #{{ entry.id }} · Team Member Training{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ entry.action_label }}</h1>
+    <p class="page-subtitle">{{ entry.created_at }}</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('audit_log_list') }}">Back to Audit Log</a>
+</div>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>Who</h3>
+    <p><strong>{{ entry.actor_name or 'Anonymous / not logged in' }}</strong></p>
+    <p class="form-hint">Role: {{ entry.actor_role or '—' }} · User ID: {{ entry.actor_id or '—' }}</p>
+  </div>
+
+  <div class="card">
+    <h3>What</h3>
+    <p><strong>{{ entry.method }}</strong> {{ entry.path }}</p>
+    <p class="form-hint">
+      {% if entry.action_type == 'change' %}<span class="badge badge-warning">Change</span>{% else %}<span class="badge badge-muted">Page visit</span>{% endif %}
+      · Status {{ entry.status_code }} · Endpoint: {{ entry.endpoint or '—' }}
+    </p>
+  </div>
+</div>
+
+{% if entry.entity_summary %}
+<div class="card">
+  <h3>Affected</h3>
+  <p>{{ entry.entity_summary }}</p>
+</div>
+{% endif %}
+
+{% if details.form %}
+<div class="card">
+  <h3>Submitted Data</h3>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      {% for key, value in details.form.items() %}
+      <tr>
+        <td>{{ key }}</td>
+        <td>{{ value }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if details.query_string %}
+<div class="card">
+  <h3>Query String</h3>
+  <div class="doc-content">{{ details.query_string }}</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Raw Details</h3>
+  <div class="doc-content">{{ entry.details }}</div>
+</div>
+{% endblock %}

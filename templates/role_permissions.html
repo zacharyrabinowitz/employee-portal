@@ -1,41 +1,85 @@
 {% extends "base.html" %}
-{% block title %}Role Permissions · Employee Portal{% endblock %}
+{% block title %}{{ role_name }} Permissions · Employee Portal{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>Role Permissions</h1>
-    <p class="page-subtitle">Control what the Manager role can see and do. Admins always have full access; Employees never have admin access — neither is editable.</p>
+    <h1>{{ role_name }} Permissions</h1>
+    <p class="page-subtitle">
+      Control exactly what {{ role_name }} can see and do, permission by permission. Admin always has full access and isn't editable.
+      {% if role_name == 'Employee' %}Granting a permission here also gives employees access to that part of the admin portal.{% endif %}
+    </p>
   </div>
-  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+  <a class="btn btn-secondary" href="{{ url_for('access_levels_list') }}">Back to Access Levels</a>
 </div>
 
 <div class="card" style="max-width:760px;">
-  <form method="post" action="{{ url_for('role_permissions_settings') }}">
-    <table>
-      <thead>
-        <tr>
-          <th>Permission</th>
-          <th style="text-align:center;">Admin</th>
-          <th style="text-align:center;">Manager</th>
-          <th style="text-align:center;">Employee</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for key, label in permissions %}
-        <tr>
-          <td>{{ label }}</td>
-          <td style="text-align:center;"><input type="checkbox" checked disabled></td>
-          <td style="text-align:center;"><input type="checkbox" name="permissions" value="{{ key }}" {% if key in manager_permissions %}checked{% endif %}></td>
-          <td style="text-align:center;"><input type="checkbox" disabled></td>
-        </tr>
+  <form method="post" action="{{ url_for(request.endpoint, **request.view_args) }}">
+    <div class="btn-row" style="margin-bottom:1.25rem;">
+      <button type="button" class="btn btn-secondary btn-small" id="select-all-btn">Select All</button>
+      <button type="button" class="btn btn-secondary btn-small" id="select-none-btn">Select None</button>
+    </div>
+
+    {% for category, items in permission_categories %}
+      {% set cat_idx = loop.index %}
+      <div class="card" style="background:var(--bg); box-shadow:none; margin-bottom:1rem;">
+        <div class="checkbox-row" style="margin-bottom:0.6rem;">
+          <input type="checkbox" class="category-select-all" data-category="{{ cat_idx }}" id="cat-{{ cat_idx }}">
+          <label for="cat-{{ cat_idx }}" style="margin:0; font-weight:700;">{{ category }} — Select All</label>
+        </div>
+        {% for key, label in items %}
+        <div class="checkbox-row" style="padding:0.25rem 0 0.25rem 1.75rem;">
+          <input type="checkbox" name="permissions" value="{{ key }}" class="perm-checkbox" data-category="{{ cat_idx }}" id="perm-{{ key }}" {% if key in manager_permissions %}checked{% endif %}>
+          <label for="perm-{{ key }}" style="margin:0; font-weight:400;">{{ label }}</label>
+        </div>
         {% endfor %}
-      </tbody>
-    </table>
-    <button type="submit" class="btn btn-primary" style="margin-top:1.25rem;">Save</button>
+      </div>
+    {% endfor %}
+
+    <button type="submit" class="btn btn-primary">Save</button>
   </form>
 </div>
 
 <div class="card" style="max-width:760px;">
-  <p class="form-hint" style="margin:0;">Deleting an employee is always Admin-only, regardless of these settings.</p>
+  <p class="form-hint" style="margin:0;">Deleting an employee, managing role permissions, backups, and the audit log are always Admin-only, regardless of these settings.</p>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  function syncCategoryCheckbox(catIdx) {
+    var boxes = document.querySelectorAll('.perm-checkbox[data-category="' + catIdx + '"]');
+    var allChecked = boxes.length > 0 && Array.prototype.every.call(boxes, function (b) { return b.checked; });
+    var catBox = document.querySelector('.category-select-all[data-category="' + catIdx + '"]');
+    if (catBox) catBox.checked = allChecked;
+  }
+
+  document.querySelectorAll('.category-select-all').forEach(function (catBox) {
+    var catIdx = catBox.dataset.category;
+    catBox.addEventListener('change', function () {
+      document.querySelectorAll('.perm-checkbox[data-category="' + catIdx + '"]').forEach(function (b) {
+        b.checked = catBox.checked;
+      });
+    });
+    syncCategoryCheckbox(catIdx);
+  });
+
+  document.querySelectorAll('.perm-checkbox').forEach(function (box) {
+    box.addEventListener('change', function () {
+      syncCategoryCheckbox(box.dataset.category);
+    });
+  });
+
+  var selectAllBtn = document.getElementById('select-all-btn');
+  var selectNoneBtn = document.getElementById('select-none-btn');
+  if (selectAllBtn) {
+    selectAllBtn.addEventListener('click', function () {
+      document.querySelectorAll('.perm-checkbox, .category-select-all').forEach(function (b) { b.checked = true; });
+    });
+  }
+  if (selectNoneBtn) {
+    selectNoneBtn.addEventListener('click', function () {
+      document.querySelectorAll('.perm-checkbox, .category-select-all').forEach(function (b) { b.checked = false; });
+    });
+  }
+});
+</script>
 {% endblock %}

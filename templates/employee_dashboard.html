@@ -1,66 +1,55 @@
 {% extends "base.html" %}
-{% block title %}My Dashboard · Employee Portal{% endblock %}
+{% block title %}My Dashboard · Team Member Training{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>Welcome, {{ employee.name }}</h1>
-    <p class="page-subtitle">{{ employee.job_title or '' }} {% if employee.department %}· {{ employee.department }}{% endif %}</p>
+    <h1>Hi, {{ employee.name.split(' ')[0] }}! 👋</h1>
+    <p class="page-subtitle">Pick something below to get started.</p>
   </div>
 </div>
 
-<div class="card-grid">
-  <div class="card">
-    <h3>Onboarding Checklist</h3>
-    <div class="progress-label"><span>{{ steps_done }} / {{ steps_total }} steps</span><span>{{ onboarding_pct }}%</span></div>
-    <div class="progress-track"><div class="progress-fill" style="width:{{ onboarding_pct }}%;"></div></div>
-    <a class="btn btn-secondary btn-small" style="margin-top:1rem;" href="{{ url_for('employee_checklist') }}">View Checklist</a>
-  </div>
-
-  <div class="card">
-    <h3>Training Progress</h3>
-    <div class="progress-label"><span>{{ assignments|selectattr('completed_at')|list|length }} / {{ assignments|length }} modules</span><span>{{ training_pct }}%</span></div>
-    <div class="progress-track"><div class="progress-fill" style="width:{{ training_pct }}%;"></div></div>
-  </div>
+{% if next_step %}
+<a class="card next-step-card" href="{{ next_step_url }}">
+  <div class="next-step-label">👉 DO THIS NEXT</div>
+  <h2>{{ next_step.step_name }}</h2>
+  <span class="btn btn-primary btn-huge">Let's Go!</span>
+</a>
+{% else %}
+<div class="card next-step-card next-step-done">
+  <div class="next-step-label">🎉 ALL DONE</div>
+  <h2>You're all caught up!</h2>
 </div>
+{% endif %}
 
-<div class="card">
-  <h3>Documents Needing Signature</h3>
-  {% for doc in pending_docs %}
-    <div class="list-item">
-      <div class="list-item-info">
-        <strong>{{ doc.title }}</strong>
-        <span>Requires your signature</span>
-      </div>
-      <a class="btn btn-primary btn-small" href="{{ url_for('document_sign', document_id=doc.id) }}">Review &amp; Sign</a>
-    </div>
-  {% else %}
-    <p class="empty-state">Nothing to sign right now.</p>
-  {% endfor %}
-</div>
+<div class="big-tile-grid">
+  <a class="big-tile" href="{{ url_for('employee_checklist') }}">
+    <div class="big-tile-icon">✅</div>
+    <div class="big-tile-label">My Checklist</div>
+    <div class="big-tile-sub">{{ steps_done }} of {{ steps_total }} done</div>
+  </a>
 
-<div class="card">
-  <h3>Assigned Training</h3>
-  {% for a in assignments %}
-    <div class="list-item">
-      <div class="list-item-info">
-        <strong>{{ a.title }}</strong>
-        <span>
-          {% if a.completed_at %}
-            Completed {{ a.completed_at }}
-          {% else %}
-            {{ a.description }}
-          {% endif %}
-        </span>
-      </div>
-      {% if a.completed_at %}
-        <span class="badge badge-success">Completed</span>
-        <a class="btn btn-secondary btn-small" href="{{ url_for('training_module_view', module_id=a.module_id) }}">View</a>
-      {% else %}
-        <a class="btn btn-primary btn-small" href="{{ url_for('training_module_view', module_id=a.module_id) }}">Start</a>
-      {% endif %}
-    </div>
-  {% else %}
-    <p class="empty-state">No training assigned yet.</p>
-  {% endfor %}
+  <a class="big-tile" href="{{ url_for('employee_checklist') }}">
+    <div class="big-tile-icon">🎓</div>
+    <div class="big-tile-label">My Training</div>
+    <div class="big-tile-sub">{{ train_done }} of {{ train_total }} done</div>
+  </a>
+
+  <a class="big-tile" href="{{ url_for('employee_quizzes') }}">
+    <div class="big-tile-icon">📝</div>
+    <div class="big-tile-label">My Quizzes</div>
+  </a>
+
+  {% if pending_docs %}
+  <a class="big-tile big-tile-alert" href="{{ url_for('document_sign', document_id=pending_docs[0].id) }}">
+    <div class="big-tile-icon">📄</div>
+    <div class="big-tile-label">Sign Documents</div>
+    <div class="big-tile-sub">{{ pending_docs|length }} waiting for you</div>
+  </a>
+  {% endif %}
+
+  <a class="big-tile" href="{{ url_for('employee_profile_self') }}">
+    <div class="big-tile-icon">👤</div>
+    <div class="big-tile-label">My Profile</div>
+  </a>
 </div>
 {% endblock %}

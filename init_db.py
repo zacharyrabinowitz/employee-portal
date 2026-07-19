@@ -52,12 +52,13 @@ def init_db():
     )
 
     for key in (
-        "manage_employees",
-        "manage_documents",
-        "manage_training",
-        "manage_quizzes",
-        "manage_onboarding_checklists",
-        "manage_settings",
+        "employees_add", "employees_edit", "employees_notes", "employees_checklist",
+        "documents_create", "documents_edit", "documents_delete", "documents_signatures",
+        "training_create", "training_edit", "training_delete", "training_slides", "training_assign",
+        "quizzes_create", "quizzes_edit", "quizzes_delete", "quizzes_assign", "quizzes_lock",
+        "quizzes_results_view", "quizzes_results_edit",
+        "checklists_templates", "checklists_items", "checklists_master", "checklists_order",
+        "settings_signup_page",
     ):
         conn.execute(
             "INSERT INTO role_permissions (role, permission) VALUES ('Manager', ?)", (key,)

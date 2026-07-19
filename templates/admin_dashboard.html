@@ -6,13 +6,61 @@
     <h1>Employees</h1>
     <p class="page-subtitle">Onboarding and training status across the team.</p>
   </div>
-  {% if can('manage_employees') %}
+  {% if can('employees_add') %}
   <a class="btn btn-primary" href="{{ url_for('add_employee') }}">+ Add Employee</a>
   {% endif %}
 </div>
 
-<div class="card">
+<div class="big-tile-grid">
+  <a class="big-tile" href="#employee-table">
+    <div class="big-tile-icon">👥</div>
+    <div class="big-tile-label">Employees</div>
+    <div class="big-tile-sub">{{ employee_count }} total</div>
+  </a>
+
+  <a class="big-tile" href="{{ url_for('admin_documents') }}">
+    <div class="big-tile-icon">📄</div>
+    <div class="big-tile-label">Documents</div>
+    <div class="big-tile-sub">{{ document_count }} total</div>
+  </a>
+
+  <a class="big-tile" href="{{ url_for('admin_training') }}">
+    <div class="big-tile-icon">🎓</div>
+    <div class="big-tile-label">Training</div>
+    <div class="big-tile-sub">{{ training_count }} modules</div>
+  </a>
+
+  <a class="big-tile" href="{{ url_for('admin_quizzes') }}">
+    <div class="big-tile-icon">📝</div>
+    <div class="big-tile-label">Quizzes</div>
+    <div class="big-tile-sub">{{ quiz_count }} total</div>
+  </a>
+
+  {% if can('reports_view') %}
+  <a class="big-tile" href="{{ url_for('reports_home') }}">
+    <div class="big-tile-icon">📊</div>
+    <div class="big-tile-label">Reports</div>
+  </a>
+  {% endif %}
+
+  <a class="big-tile" href="{{ url_for('settings_home') }}">
+    <div class="big-tile-icon">⚙️</div>
+    <div class="big-tile-label">Settings</div>
+  </a>
+
+  {% if session.get('role') == 'Admin' %}
+  <a class="big-tile" href="{{ url_for('audit_log_list') }}">
+    <div class="big-tile-icon">🔍</div>
+    <div class="big-tile-label">Audit Log</div>
+  </a>
+  {% endif %}
+</div>
+
+<div class="card" id="employee-table">
   {% if rows %}
+  <div class="form-group" style="max-width:400px;">
+    <input type="text" id="employee-search" placeholder="Search by name, email, job title, department...">
+  </div>
   <table>
     <thead>
       <tr>
@@ -27,7 +75,7 @@
     </thead>
     <tbody>
       {% for row in rows %}
-      <tr>
+      <tr data-search="{{ (row.employee.name ~ ' ' ~ row.employee.email ~ ' ' ~ (row.employee.username or '') ~ ' ' ~ (row.employee.job_title or '') ~ ' ' ~ (row.employee.department or '')) | lower }}">
         <td><a href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">{{ row.employee.name }}</a></td>
         <td>{{ row.employee.role }}</td>
         <td>{{ row.employee.hire_date or '—' }}</td>
@@ -53,8 +101,28 @@
       {% endfor %}
     </tbody>
   </table>
+  <p class="empty-state" id="no-search-results" style="display:none;">No employees match your search.</p>
   {% else %}
   <p class="empty-state">No employees yet. Add one to get started.</p>
   {% endif %}
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var searchInput = document.getElementById('employee-search');
+  if (!searchInput) return;
+  var rows = document.querySelectorAll('#employee-table tbody tr');
+  var noResults = document.getElementById('no-search-results');
+  searchInput.addEventListener('input', function () {
+    var q = searchInput.value.trim().toLowerCase();
+    var visibleCount = 0;
+    rows.forEach(function (row) {
+      var match = !q || (row.dataset.search || '').indexOf(q) !== -1;
+      row.style.display = match ? '' : 'none';
+      if (match) visibleCount++;
+    });
+    if (noResults) noResults.style.display = visibleCount === 0 ? '' : 'none';
+  });
+});
+</script>
 {% endblock %}
