@@ -3,135 +3,197 @@
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>{{ document.title }}</h1>
-    <p class="page-subtitle">{% if document.requires_upload %}Upload audit trail{% else %}Signature audit trail{% endif %}</p>
+    <h1>{{ document.title }} {% if document.is_onboarding %}<span class="badge badge-success">Standard onboarding</span>{% endif %}</h1>
+    <p class="page-subtitle">{% if document.requires_upload %}Upload request{% else %}Sign-off document{% endif %}</p>
   </div>
   <a class="btn btn-secondary" href="{{ url_for('admin_documents') }}">Back to Documents</a>
 </div>
 
-<div class="card">
-  <h3>Document</h3>
-  {% if document.file_path %}
-    {% set file_url = url_for('document_file', filename=document.file_path) %}
-    {% set ext = document.file_path.rsplit('.', 1)[-1].lower() %}
-    {% if ext == 'pdf' %}
-      <iframe src="{{ file_url }}" style="width:100%; height:60vh; border:1px solid var(--border); border-radius:8px;"></iframe>
-    {% elif ext in ['png', 'jpg', 'jpeg'] %}
-      <img src="{{ file_url }}" alt="{{ document.title }}" style="max-width:100%; border-radius:8px; border:1px solid var(--border);">
-    {% else %}
-      <p><a class="btn btn-secondary" href="{{ file_url }}" target="_blank" rel="noopener">Download {{ document.title }}</a></p>
+<div class="tabs">
+  <div class="tab-buttons">
+    <button type="button" class="tab-btn active" data-tab="overview">Overview</button>
+    <button type="button" class="tab-btn" data-tab="onboarding">Onboarding</button>
+    <button type="button" class="tab-btn" data-tab="assign">Assign &amp; Status</button>
+    {% if can('documents_delete') %}
+    <button type="button" class="tab-btn" data-tab="danger">Danger Zone</button>
     {% endif %}
-    <p><a href="{{ file_url }}" target="_blank" rel="noopener">Open in a new tab</a></p>
-  {% endif %}
-  {% if document.content %}
-    <div class="doc-content">{{ document.content }}</div>
-  {% elif not document.file_path %}
-    <div class="doc-content">No content provided.</div>
-  {% endif %}
-</div>
-
-{% if can('documents_edit') %}
-<div class="card" style="max-width:640px;">
-  <h3>Edit Document</h3>
-  <form method="post" action="{{ url_for('edit_document', document_id=document.id) }}" enctype="multipart/form-data">
-    <div class="form-group">
-      <label for="title">Title</label>
-      <input type="text" id="title" name="title" value="{{ document.title }}" required>
-    </div>
-    <div class="form-group">
-      <label for="content">Notes</label>
-      <textarea id="content" name="content">{{ document.content or '' }}</textarea>
-    </div>
-    <div class="form-group">
-      <label for="document_file">Replace attached file (optional)</label>
-      <input type="file" id="document_file" name="document_file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg">
-      <p class="form-hint">Leave blank to keep the current file. Uploading a new one replaces it.</p>
-    </div>
-    <button type="submit" class="btn btn-secondary">Save Changes</button>
-  </form>
-</div>
-{% endif %}
-
-{% if document.requires_upload %}
-<div class="card-grid">
-  <div class="card">
-    <h3>Uploaded ({{ uploaded|length }})</h3>
-    {% for up in uploaded %}
-      <div class="list-item">
-        <div class="list-item-info">
-          <strong>{{ up.employee_name }}</strong>
-          <span>Uploaded on {{ up.uploaded_at }}</span>
-        </div>
-        <div class="btn-row">
-          <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=up.id) }}" target="_blank" rel="noopener">View File</a>
-        </div>
-      </div>
-    {% else %}
-      <p class="empty-state">No one has uploaded yet.</p>
-    {% endfor %}
   </div>
 
-  <div class="card">
-    <h3>Outstanding ({{ not_uploaded|length }})</h3>
-    {% for emp in not_uploaded %}
-      <div class="list-item">
-        <div class="list-item-info">
-          <strong>{{ emp.name }}</strong>
-          <span>{{ emp.email }}</span>
-        </div>
-      </div>
-    {% else %}
-      <p class="empty-state">Everyone has uploaded.</p>
-    {% endfor %}
-  </div>
-</div>
-{% else %}
-<div class="card-grid">
-  <div class="card">
-    <h3>Signed ({{ signed|length }})</h3>
-    {% for sig in signed %}
-      <div class="list-item">
-        <div class="list-item-info">
-          <strong>{{ sig.employee_name }}</strong>
-          <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }} from {{ sig.session_marker }}</span>
-        </div>
-        {% if can('documents_signatures') %}
-        <form method="post" action="{{ url_for('delete_signature', signature_id=sig.id) }}" onsubmit="return confirm('Remove this signature? Their checklist step will become pending again.');">
-          <button type="submit" class="btn btn-danger btn-small">Remove</button>
-        </form>
+  <div class="tab-panel active" data-tab="overview">
+    <div class="card">
+      <h3>Document</h3>
+      {% if document.file_path %}
+        {% set file_url = url_for('document_file', filename=document.file_path) %}
+        {% set ext = document.file_path.rsplit('.', 1)[-1].lower() %}
+        {% if ext == 'pdf' %}
+          <iframe src="{{ file_url }}" style="width:100%; height:60vh; border:1px solid var(--border); border-radius:8px;"></iframe>
+        {% elif ext in ['png', 'jpg', 'jpeg'] %}
+          <img src="{{ file_url }}" alt="{{ document.title }}" style="max-width:100%; border-radius:8px; border:1px solid var(--border);">
+        {% else %}
+          <p><a class="btn btn-secondary" href="{{ file_url }}" target="_blank" rel="noopener">Download {{ document.title }}</a></p>
         {% endif %}
-      </div>
-    {% else %}
-      <p class="empty-state">No one has signed yet.</p>
-    {% endfor %}
-  </div>
-
-  <div class="card">
-    <h3>Outstanding ({{ unsigned|length }})</h3>
-    {% for emp in unsigned %}
-      <div class="list-item">
-        <div class="list-item-info">
-          <strong>{{ emp.name }}</strong>
-          <span>{{ emp.email }}</span>
-        </div>
-      </div>
-    {% else %}
-      <p class="empty-state">Everyone has signed.</p>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
-{% if can('documents_delete') %}
-<div class="card confirm-box">
-  <p>Deleting this document removes all associated signatures, uploads, and checklist steps.</p>
-  <form method="post" action="{{ url_for('delete_document', document_id=document.id) }}">
-    <div class="form-group">
-      <label for="confirm">Type "delete" to confirm</label>
-      <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+        <p><a href="{{ file_url }}" target="_blank" rel="noopener">Open in a new tab</a></p>
+      {% endif %}
+      {% if document.content %}
+        <div class="doc-content">{{ document.content }}</div>
+      {% elif not document.file_path %}
+        <div class="doc-content">No content provided.</div>
+      {% endif %}
     </div>
-    <button type="submit" class="btn btn-danger">Delete Document</button>
-  </form>
+
+    {% if can('documents_edit') %}
+    <div class="card" style="max-width:640px;">
+      <h3>Edit Document</h3>
+      <form method="post" action="{{ url_for('edit_document', document_id=document.id) }}" enctype="multipart/form-data">
+        <div class="form-group">
+          <label for="title">Title</label>
+          <input type="text" id="title" name="title" value="{{ document.title }}" required>
+        </div>
+        <div class="form-group">
+          <label for="content">Notes</label>
+          <textarea id="content" name="content">{{ document.content or '' }}</textarea>
+        </div>
+        <div class="form-group">
+          <label for="document_file">Replace attached file (optional)</label>
+          <input type="file" id="document_file" name="document_file" accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg">
+          <p class="form-hint">Leave blank to keep the current file. Uploading a new one replaces it.</p>
+        </div>
+        <button type="submit" class="btn btn-secondary">Save Changes</button>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel" data-tab="onboarding">
+    {% if can('documents_assign') %}
+    <div class="card" style="max-width:520px;">
+      <h3>Standard Onboarding</h3>
+      <p class="form-hint">{% if document.requires_upload %}Require this upload from{% else %}Require a signature from{% endif %} every employee automatically — current and future hires.</p>
+      <form method="post" action="{{ url_for('toggle_document_onboarding', document_id=document.id) }}">
+        {% if document.is_onboarding %}
+          <button type="submit" class="btn btn-secondary">Remove from Standard Onboarding</button>
+        {% else %}
+          <button type="submit" class="btn btn-secondary">Add to Standard Onboarding (All Employees)</button>
+        {% endif %}
+      </form>
+    </div>
+    {% else %}
+      <p class="empty-state">You don't have permission to manage onboarding settings for this document.</p>
+    {% endif %}
+  </div>
+
+  <div class="tab-panel" data-tab="assign">
+    {% if can('documents_assign') %}
+    <div class="card" style="max-width:640px;">
+      <h3>Assign Document</h3>
+      <p class="form-hint">Assign this to everyone, or just the employees who actually need it — e.g. a specific team or job.</p>
+      <form method="post" action="{{ url_for('assign_document', document_id=document.id) }}">
+        <div class="checkbox-row form-group">
+          <input type="checkbox" id="assign_all" name="assign_all">
+          <label for="assign_all">Assign to all current employees</label>
+        </div>
+        {% if unassigned %}
+        <div class="form-group">
+          <label>Or select individually (your group)</label>
+          {% for emp in unassigned %}
+            <div class="checkbox-row" style="margin-bottom:0.4rem;">
+              <input type="checkbox" id="emp_{{ emp.id }}" name="employee_ids" value="{{ emp.id }}">
+              <label for="emp_{{ emp.id }}" style="font-weight:400;">{{ emp.name }} ({{ emp.email }})</label>
+            </div>
+          {% endfor %}
+        </div>
+        {% else %}
+          <p class="form-hint">All employees are already assigned.</p>
+        {% endif %}
+        <button type="submit" class="btn btn-primary">Assign</button>
+      </form>
+    </div>
+    {% endif %}
+
+    {% if document.requires_upload %}
+    <div class="card-grid">
+      <div class="card">
+        <h3>Uploaded ({{ uploaded|length }})</h3>
+        {% for up in uploaded %}
+          <div class="list-item">
+            <div class="list-item-info">
+              <strong>{{ up.employee_name }}</strong>
+              <span>Uploaded on {{ up.uploaded_at }}</span>
+            </div>
+            <div class="btn-row">
+              <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=up.id) }}" target="_blank" rel="noopener">View File</a>
+            </div>
+          </div>
+        {% else %}
+          <p class="empty-state">No one has uploaded yet.</p>
+        {% endfor %}
+      </div>
+
+      <div class="card">
+        <h3>Outstanding ({{ not_uploaded|length }})</h3>
+        {% for emp in not_uploaded %}
+          <div class="list-item">
+            <div class="list-item-info">
+              <strong>{{ emp.name }}</strong>
+              <span>{{ emp.email }}</span>
+            </div>
+          </div>
+        {% else %}
+          <p class="empty-state">Everyone assigned has uploaded.</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="card-grid">
+      <div class="card">
+        <h3>Signed ({{ signed|length }})</h3>
+        {% for sig in signed %}
+          <div class="list-item">
+            <div class="list-item-info">
+              <strong>{{ sig.employee_name }}</strong>
+              <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }} from {{ sig.session_marker }}</span>
+            </div>
+            {% if can('documents_signatures') %}
+            <form method="post" action="{{ url_for('delete_signature', signature_id=sig.id) }}" onsubmit="return confirm('Remove this signature? Their checklist step will become pending again.');">
+              <button type="submit" class="btn btn-danger btn-small">Remove</button>
+            </form>
+            {% endif %}
+          </div>
+        {% else %}
+          <p class="empty-state">No one has signed yet.</p>
+        {% endfor %}
+      </div>
+
+      <div class="card">
+        <h3>Outstanding ({{ unsigned|length }})</h3>
+        {% for emp in unsigned %}
+          <div class="list-item">
+            <div class="list-item-info">
+              <strong>{{ emp.name }}</strong>
+              <span>{{ emp.email }}</span>
+            </div>
+          </div>
+        {% else %}
+          <p class="empty-state">Everyone assigned has signed.</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if can('documents_delete') %}
+  <div class="tab-panel" data-tab="danger">
+    <div class="card confirm-box">
+      <p>Deleting this document removes all associated signatures, uploads, and checklist steps.</p>
+      <form method="post" action="{{ url_for('delete_document', document_id=document.id) }}">
+        <div class="form-group">
+          <label for="confirm">Type "delete" to confirm</label>
+          <input type="text" id="confirm" name="confirm" placeholder="delete" required style="max-width:220px;">
+        </div>
+        <button type="submit" class="btn btn-danger">Delete Document</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 </div>
-{% endif %}
 {% endblock %}

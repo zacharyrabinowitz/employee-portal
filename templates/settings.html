@@ -58,9 +58,10 @@
 
   <div class="card">
     <h3>Backup &amp; Restore</h3>
-    <p class="form-hint">Download everything — every employee, document, training module, slide image, and setting — as a single file. Keep it somewhere safe in case you ever need to reset or recover the database.</p>
+    <p class="form-hint">A full backup — every employee, document, training module, slide image, and setting — is taken automatically once a day and kept on the server. You can also export one on demand or restore from any backup file.</p>
     <div class="btn-row">
-      <a class="btn btn-primary btn-small" href="{{ url_for('export_data') }}">Export All Data</a>
+      <a class="btn btn-primary btn-small" href="{{ url_for('backups_list') }}">Automatic Backups</a>
+      <a class="btn btn-secondary btn-small" href="{{ url_for('export_data') }}">Export All Data</a>
       <a class="btn btn-secondary btn-small" href="{{ url_for('import_data') }}">Restore from Backup</a>
     </div>
   </div>

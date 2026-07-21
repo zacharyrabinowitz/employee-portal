@@ -8,9 +8,12 @@ import re
 import secrets
 import shutil
 import sqlite3
+import sys
 import tempfile
+import threading
+import time
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import migrate as db_migrate
 
@@ -43,6 +46,8 @@ ALLOWED_MEDIA_EXTENSIONS = ALLOWED_IMAGE_EXTENSIONS | ALLOWED_VIDEO_EXTENSIONS
 MAX_MEDIA_BYTES = 50 * 1024 * 1024  # 50 MB per image/video
 
 UPLOADS_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backups")
+BACKUP_FILENAME_RE = re.compile(r"^employee-portal-backup-(\d{8})-(\d{6})\.zip$")
 
 app = Flask(__name__)
 app.secret_key = "dev-secret-key-change-me"
@@ -391,6 +396,7 @@ PERMISSION_CATEGORIES = [
         ("documents_edit", "Edit existing documents"),
         ("documents_delete", "Delete documents"),
         ("documents_signatures", "Remove individual employee signatures"),
+        ("documents_assign", "Assign documents and toggle \"required for everyone\""),
     ]),
     ("Training", [
         ("training_create", "Create training modules"),
@@ -642,6 +648,25 @@ def assign_module_to_employee(db, module_id, module_title, employee_id):
     return True
 
 
+def assign_document_to_employee(db, document, employee_id):
+    """Assign a document (sign or upload) to an employee via an onboarding checklist
+    step, unless they're already assigned. Returns True if newly assigned."""
+    step_type = "document" if document["requires_signature"] else "upload"
+    already = db.execute(
+        "SELECT id FROM onboarding_steps WHERE employee_id = ? AND step_type = ? AND related_id = ?",
+        (employee_id, step_type, document["id"]),
+    ).fetchone()
+    if already:
+        return False
+    verb = "Sign" if document["requires_signature"] else "Upload"
+    db.execute(
+        """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
+           VALUES (?, ?, ?, ?)""",
+        (employee_id, f"{verb} {document['title']}", step_type, document["id"]),
+    )
+    return True
+
+
 def apply_onboarding_template_items(db, employee_id, template_id):
     """Add any of an onboarding checklist template's items the employee doesn't already
     have on their checklist. Safe to call repeatedly (e.g. every time the template
@@ -721,7 +746,7 @@ def seed_onboarding_steps(db, employee_id):
         )
 
     docs = db.execute(
-        "SELECT id, title FROM documents WHERE requires_signature = 1"
+        "SELECT id, title FROM documents WHERE requires_signature = 1 AND is_onboarding = 1"
     ).fetchall()
     for doc in docs:
         db.execute(
@@ -731,7 +756,7 @@ def seed_onboarding_steps(db, employee_id):
         )
 
     upload_docs = db.execute(
-        "SELECT id, title FROM documents WHERE requires_upload = 1"
+        "SELECT id, title FROM documents WHERE requires_upload = 1 AND is_onboarding = 1"
     ).fetchall()
     for doc in upload_docs:
         db.execute(
@@ -1710,6 +1735,7 @@ def admin_documents():
         document_type = request.form.get("document_type", "sign")
         requires_signature = 1 if document_type == "sign" else 0
         requires_upload = 1 if document_type == "upload" else 0
+        is_onboarding = 1 if request.form.get("is_onboarding") == "on" else 0
 
         file = request.files.get("document_file")
         file_path = None
@@ -1724,27 +1750,28 @@ def admin_documents():
 
         if title:
             cur = db.execute(
-                """INSERT INTO documents (title, content, file_path, requires_signature, requires_upload)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (title, content, file_path, requires_signature, requires_upload),
+                """INSERT INTO documents (title, content, file_path, requires_signature, requires_upload, is_onboarding)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (title, content, file_path, requires_signature, requires_upload, is_onboarding),
             )
             new_doc_id = cur.lastrowid
 
-            if requires_signature or requires_upload:
-                step_type = "document" if requires_signature else "upload"
-                verb = "Sign" if requires_signature else "Upload"
+            if is_onboarding:
+                document = db.execute(
+                    "SELECT * FROM documents WHERE id = ?", (new_doc_id,)
+                ).fetchone()
                 employees = db.execute(
                     "SELECT id FROM employees WHERE role = 'Employee'"
                 ).fetchall()
                 for emp in employees:
-                    db.execute(
-                        """INSERT INTO onboarding_steps (employee_id, step_name, step_type, related_id)
-                           VALUES (?, ?, ?, ?)""",
-                        (emp["id"], f"{verb} {title}", step_type, new_doc_id),
-                    )
+                    assign_document_to_employee(db, document, emp["id"])
 
             db.commit()
-            flash("Document created.", "success")
+            if is_onboarding:
+                flash("Document created and assigned to every employee.", "success")
+            else:
+                flash("Document created. Assign it to specific employees from its page below.", "success")
+            return redirect(url_for("document_audit", document_id=new_doc_id) + "#assign")
         return redirect(url_for("admin_documents"))
 
     documents = db.execute("SELECT * FROM documents ORDER BY created_at DESC").fetchall()
@@ -1766,6 +1793,62 @@ def admin_documents():
     return render_template("admin_documents.html", doc_rows=doc_rows)
 
 
+@app.route("/admin/documents/<int:document_id>/toggle-onboarding", methods=["POST"])
+def toggle_document_onboarding(document_id):
+    resp = require_permission("documents_assign")
+    if resp:
+        return resp
+
+    db = get_db()
+    document = db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if document is None:
+        flash("Document not found.", "error")
+        return redirect(url_for("admin_documents"))
+
+    new_value = 0 if document["is_onboarding"] else 1
+    db.execute("UPDATE documents SET is_onboarding = ? WHERE id = ?", (new_value, document_id))
+
+    if new_value:
+        document = db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
+        employees = db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
+        for emp in employees:
+            assign_document_to_employee(db, document, emp["id"])
+        flash(f'"{document["title"]}" added to every employee\'s onboarding checklist.', "success")
+    else:
+        flash(f'"{document["title"]}" removed from new-employee onboarding checklists.', "success")
+
+    db.commit()
+    return redirect(url_for("document_audit", document_id=document_id) + "#onboarding")
+
+
+@app.route("/admin/documents/<int:document_id>/assign", methods=["POST"])
+def assign_document(document_id):
+    resp = require_permission("documents_assign")
+    if resp:
+        return resp
+
+    db = get_db()
+    document = db.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if document is None:
+        flash("Document not found.", "error")
+        return redirect(url_for("admin_documents"))
+
+    if request.form.get("assign_all") == "on":
+        target_ids = [
+            e["id"]
+            for e in db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
+        ]
+    else:
+        target_ids = [int(x) for x in request.form.getlist("employee_ids")]
+
+    for emp_id in target_ids:
+        assign_document_to_employee(db, document, emp_id)
+
+    db.commit()
+    flash("Document assigned.", "success")
+    return redirect(url_for("document_audit", document_id=document_id) + "#assign")
+
+
 @app.route("/admin/documents/<int:document_id>")
 def document_audit(document_id):
     resp = require_admin_or_manager()
@@ -1778,6 +1861,22 @@ def document_audit(document_id):
         flash("Document not found.", "error")
         return redirect(url_for("admin_documents"))
 
+    step_type = "upload" if document["requires_upload"] else "document"
+    assigned_ids = {
+        row["employee_id"]
+        for row in db.execute(
+            "SELECT employee_id FROM onboarding_steps WHERE step_type = ? AND related_id = ?",
+            (step_type, document_id),
+        ).fetchall()
+    }
+    unassigned = [
+        e
+        for e in db.execute(
+            "SELECT * FROM employees WHERE role = 'Employee' ORDER BY name"
+        ).fetchall()
+        if e["id"] not in assigned_ids
+    ]
+
     if document["requires_upload"]:
         uploaded = db.execute(
             """SELECT employee_uploads.*, employees.name AS employee_name
@@ -1789,14 +1888,18 @@ def document_audit(document_id):
             (document_id,),
         ).fetchall()
         not_uploaded = db.execute(
-            """SELECT * FROM employees WHERE role = 'Employee' AND id NOT IN (
-                 SELECT employee_id FROM onboarding_steps
-                 WHERE step_type = 'upload' AND related_id = ? AND completed_at IS NOT NULL
-               )""",
+            """SELECT employees.* FROM employees
+               JOIN onboarding_steps ON onboarding_steps.employee_id = employees.id
+               WHERE onboarding_steps.step_type = 'upload' AND onboarding_steps.related_id = ?
+                 AND onboarding_steps.completed_at IS NULL""",
             (document_id,),
         ).fetchall()
         return render_template(
-            "document_audit.html", document=document, uploaded=uploaded, not_uploaded=not_uploaded
+            "document_audit.html",
+            document=document,
+            uploaded=uploaded,
+            not_uploaded=not_uploaded,
+            unassigned=unassigned,
         )
 
     signed = db.execute(
@@ -1806,14 +1909,19 @@ def document_audit(document_id):
         (document_id,),
     ).fetchall()
     unsigned = db.execute(
-        """SELECT * FROM employees WHERE role = 'Employee' AND id NOT IN (
-             SELECT employee_id FROM signatures WHERE document_id = ?
-           )""",
+        """SELECT employees.* FROM employees
+           JOIN onboarding_steps ON onboarding_steps.employee_id = employees.id
+           WHERE onboarding_steps.step_type = 'document' AND onboarding_steps.related_id = ?
+             AND onboarding_steps.completed_at IS NULL""",
         (document_id,),
     ).fetchall()
 
     return render_template(
-        "document_audit.html", document=document, signed=signed, unsigned=unsigned
+        "document_audit.html",
+        document=document,
+        signed=signed,
+        unsigned=unsigned,
+        unassigned=unassigned,
     )
 
 
@@ -4971,12 +5079,9 @@ def reports_export():
 # Full data export / import (backup and restore)
 # ---------------------------------------------------------------------------
 
-@app.route("/admin/settings/export")
-def export_data():
-    resp = require_admin()
-    if resp:
-        return resp
-
+def build_backup_zip_bytes(exported_by=None):
+    """Build a full backup zip (db snapshot + manifest + uploads) and return its bytes.
+    Shared by the on-demand export route and the automatic daily backup job."""
     # Consistent snapshot of the live database via SQLite's own backup API,
     # rather than copying the file directly (safe even mid-write).
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
@@ -5010,7 +5115,7 @@ def export_data():
                 {
                     "app": "employee-portal",
                     "exported_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-                    "exported_by": session.get("name"),
+                    "exported_by": exported_by,
                 },
                 indent=2,
             ),
@@ -5022,11 +5127,195 @@ def export_data():
                     arcname = os.path.join("uploads", os.path.relpath(full_path, UPLOADS_ROOT))
                     zf.write(full_path, arcname)
     buffer.seek(0)
+    return buffer.getvalue()
 
+
+@app.route("/admin/settings/export")
+def export_data():
+    resp = require_admin()
+    if resp:
+        return resp
+
+    zip_bytes = build_backup_zip_bytes(exported_by=session.get("name"))
     filename = f"employee-portal-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
     return send_file(
-        buffer, mimetype="application/zip", as_attachment=True, download_name=filename
+        io.BytesIO(zip_bytes), mimetype="application/zip", as_attachment=True, download_name=filename
     )
+
+
+# ---------------------------------------------------------------------------
+# Automatic daily backup
+# ---------------------------------------------------------------------------
+
+def list_backup_files():
+    """Backup files on disk, newest first, as dicts with filename/size/mtime."""
+    if not os.path.isdir(BACKUP_DIR):
+        return []
+    items = []
+    for fname in os.listdir(BACKUP_DIR):
+        if not BACKUP_FILENAME_RE.match(fname):
+            continue
+        full_path = os.path.join(BACKUP_DIR, fname)
+        try:
+            stat = os.stat(full_path)
+        except OSError:
+            continue
+        items.append(
+            {
+                "filename": fname,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "created": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %I:%M %p"),
+            }
+        )
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return items
+
+
+def cleanup_old_backups(retention_days):
+    """Delete backup files older than retention_days (by file mtime)."""
+    cutoff = time.time() - (retention_days * 86400)
+    for item in list_backup_files():
+        if item["mtime"] < cutoff:
+            try:
+                os.remove(os.path.join(BACKUP_DIR, item["filename"]))
+            except OSError:
+                pass
+
+
+def perform_automatic_backup():
+    """Build and save a backup file for today, if one doesn't already exist.
+    Uses an exclusive lock file so multiple worker processes never race to
+    write the same day's backup twice."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    today = datetime.utcnow().strftime("%Y%m%d")
+    lock_path = os.path.join(BACKUP_DIR, f".lock-{today}")
+
+    if any(f["filename"].startswith(f"employee-portal-backup-{today}-") for f in list_backup_files()):
+        return False
+
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        return False  # another process already claimed today's backup
+
+    try:
+        zip_bytes = build_backup_zip_bytes(exported_by="Automatic Daily Backup")
+        filename = f"employee-portal-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+        with open(os.path.join(BACKUP_DIR, filename), "wb") as f:
+            f.write(zip_bytes)
+
+        db = sqlite3.connect(DB_PATH)
+        try:
+            retention_days = int(get_setting(db, "backup_retention_days", "30"))
+        except ValueError:
+            retention_days = 30
+        finally:
+            db.close()
+        cleanup_old_backups(retention_days)
+        return True
+    except Exception:
+        print("Automatic backup failed:", file=sys.stderr)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+        return False
+
+
+def backup_scheduler_loop():
+    # Try once at startup (covers the app having been down at the usual time),
+    # then just check hourly — perform_automatic_backup() is a no-op once
+    # today's backup already exists, so this is safe to call repeatedly.
+    while True:
+        try:
+            perform_automatic_backup()
+        except Exception:
+            print("Backup scheduler loop error:", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+        time.sleep(3600)
+
+
+def start_backup_scheduler():
+    thread = threading.Thread(target=backup_scheduler_loop, daemon=True, name="backup-scheduler")
+    thread.start()
+
+
+@app.route("/admin/settings/backups")
+def backups_list():
+    resp = require_admin()
+    if resp:
+        return resp
+    db = get_db()
+    try:
+        retention_days = int(get_setting(db, "backup_retention_days", "30"))
+    except ValueError:
+        retention_days = 30
+    return render_template("backups.html", backups=list_backup_files(), retention_days=retention_days)
+
+
+@app.route("/admin/settings/backups/run-now", methods=["POST"])
+def backups_run_now():
+    resp = require_admin()
+    if resp:
+        return resp
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    zip_bytes = build_backup_zip_bytes(exported_by=session.get("name"))
+    filename = f"employee-portal-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.zip"
+    with open(os.path.join(BACKUP_DIR, filename), "wb") as f:
+        f.write(zip_bytes)
+    db = get_db()
+    try:
+        retention_days = int(get_setting(db, "backup_retention_days", "30"))
+    except ValueError:
+        retention_days = 30
+    cleanup_old_backups(retention_days)
+    flash("Backup created.", "success")
+    return redirect(url_for("backups_list"))
+
+
+@app.route("/admin/settings/backups/<filename>/download")
+def backups_download(filename):
+    resp = require_admin()
+    if resp:
+        return resp
+    if not BACKUP_FILENAME_RE.match(filename):
+        flash("Invalid backup filename.", "error")
+        return redirect(url_for("backups_list"))
+    return send_from_directory(BACKUP_DIR, filename, as_attachment=True)
+
+
+@app.route("/admin/settings/backups/<filename>/delete", methods=["POST"])
+def backups_delete(filename):
+    resp = require_admin()
+    if resp:
+        return resp
+    if BACKUP_FILENAME_RE.match(filename):
+        try:
+            os.remove(os.path.join(BACKUP_DIR, filename))
+            flash("Backup deleted.", "success")
+        except OSError:
+            flash("Could not delete that backup file.", "error")
+    else:
+        flash("Invalid backup filename.", "error")
+    return redirect(url_for("backups_list"))
+
+
+@app.route("/admin/settings/backups/retention", methods=["POST"])
+def backups_set_retention():
+    resp = require_admin()
+    if resp:
+        return resp
+    db = get_db()
+    try:
+        days = max(1, int(request.form.get("retention_days", "30")))
+    except ValueError:
+        days = 30
+    set_setting(db, "backup_retention_days", str(days))
+    db.commit()
+    cleanup_old_backups(days)
+    flash(f"Backups will now be kept for {days} day(s).", "success")
+    return redirect(url_for("backups_list"))
 
 
 @app.route("/admin/settings/import", methods=["GET", "POST"])
@@ -5124,6 +5413,9 @@ def import_data():
         return redirect(url_for("login"))
 
     return render_template("import_data.html")
+
+
+start_backup_scheduler()
 
 
 if __name__ == "__main__":

@@ -331,6 +331,36 @@ def migrate():
         )
         print("Created quiz_locks table (per-employee quiz locking)")
 
+    if not column_exists(conn, "documents", "is_onboarding"):
+        conn.execute("ALTER TABLE documents ADD COLUMN is_onboarding INTEGER NOT NULL DEFAULT 0")
+        # Preserve current behavior: every existing document has always been
+        # auto-assigned to every employee, current and future. Flip them all on
+        # so upgrading doesn't silently remove anyone's checklist items.
+        conn.execute("UPDATE documents SET is_onboarding = 1")
+        print("Added documents.is_onboarding (existing documents kept as \"required for everyone\")")
+
+    if table_exists(conn, "role_permissions"):
+        # New granular permission bolted onto the existing Documents category —
+        # anyone who could already edit documents keeps full document management,
+        # including the new assign action, after upgrading.
+        roles_with_doc_edit = [
+            row[0]
+            for row in conn.execute(
+                "SELECT DISTINCT role FROM role_permissions WHERE permission = 'documents_edit'"
+            ).fetchall()
+        ]
+        for role in roles_with_doc_edit:
+            exists = conn.execute(
+                "SELECT 1 FROM role_permissions WHERE role = ? AND permission = 'documents_assign'",
+                (role,),
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO role_permissions (role, permission) VALUES (?, 'documents_assign')",
+                    (role,),
+                )
+                print(f"Granted '{role}' the new documents_assign permission (already had documents_edit)")
+
     if not table_exists(conn, "custom_roles"):
         conn.execute(
             """CREATE TABLE custom_roles (

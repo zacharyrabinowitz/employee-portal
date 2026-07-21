@@ -53,7 +53,7 @@ def init_db():
 
     for key in (
         "employees_add", "employees_edit", "employees_notes", "employees_checklist",
-        "documents_create", "documents_edit", "documents_delete", "documents_signatures",
+        "documents_create", "documents_edit", "documents_delete", "documents_signatures", "documents_assign",
         "training_create", "training_edit", "training_delete", "training_slides", "training_assign",
         "quizzes_create", "quizzes_edit", "quizzes_delete", "quizzes_assign", "quizzes_lock",
         "quizzes_results_view", "quizzes_results_edit",

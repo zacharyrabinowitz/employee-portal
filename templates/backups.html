@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Automatic Backups · Employee Portal{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Automatic Backups</h1>
+    <p class="page-subtitle">A full backup is taken automatically once a day and kept for {{ retention_days }} day(s). You can also trigger one manually below.</p>
+  </div>
+  <a class="btn btn-secondary" href="{{ url_for('settings_home') }}">Back to Settings</a>
+</div>
+
+<div class="card">
+  <div class="btn-row" style="margin-bottom:1rem;">
+    <form method="post" action="{{ url_for('backups_run_now') }}">
+      <button type="submit" class="btn btn-primary btn-small">Run Backup Now</button>
+    </form>
+  </div>
+
+  {% if backups %}
+  <table class="responsive-table">
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Size</th>
+        <th>Created</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in backups %}
+      <tr>
+        <td data-label="File">{{ b.filename }}</td>
+        <td data-label="Size">{{ "%.1f"|format(b.size / (1024*1024)) }} MB</td>
+        <td data-label="Created">{{ b.created }}</td>
+        <td data-label="">
+          <div class="btn-row">
+            <a class="btn btn-secondary btn-small" href="{{ url_for('backups_download', filename=b.filename) }}">Download</a>
+            <form method="post" action="{{ url_for('backups_delete', filename=b.filename) }}" onsubmit="return confirm('Delete this backup? This cannot be undone.');">
+              <button type="submit" class="btn btn-danger btn-small">Delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty-state">No backups yet — one will be created automatically within the next hour, or click "Run Backup Now" above.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:400px;">
+  <h3>Retention</h3>
+  <form method="post" action="{{ url_for('backups_set_retention') }}" class="btn-row" style="align-items:center;">
+    <div class="form-group" style="margin:0;">
+      <label for="retention_days">Keep backups for (days)</label>
+      <input type="number" id="retention_days" name="retention_days" min="1" value="{{ retention_days }}" style="max-width:100px;">
+    </div>
+    <button type="submit" class="btn btn-secondary btn-small">Update</button>
+  </form>
+</div>
+{% endblock %}
