@@ -1770,8 +1770,8 @@ def admin_documents():
             if is_onboarding:
                 flash("Document created and assigned to every employee.", "success")
             else:
-                flash("Document created. Assign it to specific employees from its page below.", "success")
-            return redirect(url_for("document_audit", document_id=new_doc_id) + "#assign")
+                flash("Document created. Pick which onboarding checklist(s) it belongs to below.", "success")
+            return redirect(url_for("document_audit", document_id=new_doc_id) + "#onboarding")
         return redirect(url_for("admin_documents"))
 
     documents = db.execute("SELECT * FROM documents ORDER BY created_at DESC").fetchall()
@@ -1821,8 +1821,8 @@ def toggle_document_onboarding(document_id):
     return redirect(url_for("document_audit", document_id=document_id) + "#onboarding")
 
 
-@app.route("/admin/documents/<int:document_id>/assign", methods=["POST"])
-def assign_document(document_id):
+@app.route("/admin/documents/<int:document_id>/checklists", methods=["POST"])
+def update_document_checklists(document_id):
     resp = require_permission("documents_assign")
     if resp:
         return resp
@@ -1833,20 +1833,41 @@ def assign_document(document_id):
         flash("Document not found.", "error")
         return redirect(url_for("admin_documents"))
 
-    if request.form.get("assign_all") == "on":
-        target_ids = [
-            e["id"]
-            for e in db.execute("SELECT id FROM employees WHERE role = 'Employee'").fetchall()
-        ]
-    else:
-        target_ids = [int(x) for x in request.form.getlist("employee_ids")]
+    step_type = "upload" if document["requires_upload"] else "document"
+    verb = "Upload" if document["requires_upload"] else "Sign"
 
-    for emp_id in target_ids:
-        assign_document_to_employee(db, document, emp_id)
+    selected_ids = {int(x) for x in request.form.getlist("template_ids")}
+    existing_items = db.execute(
+        "SELECT * FROM onboarding_template_items WHERE step_type = ? AND related_id = ?",
+        (step_type, document_id),
+    ).fetchall()
+    existing_template_ids = {item["template_id"] for item in existing_items}
+
+    for template_id in selected_ids - existing_template_ids:
+        max_order = db.execute(
+            "SELECT COALESCE(MAX(sort_order), -1) FROM onboarding_template_items WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()[0]
+        db.execute(
+            """INSERT INTO onboarding_template_items (template_id, step_name, step_type, related_id, sort_order)
+               VALUES (?, ?, ?, ?, ?)""",
+            (template_id, f"{verb} {document['title']}", step_type, document_id, max_order + 1),
+        )
+        # Apply immediately to employees already on this checklist, not just future hires.
+        current_members = db.execute(
+            "SELECT id FROM employees WHERE onboarding_template_id = ? AND role = 'Employee'",
+            (template_id,),
+        ).fetchall()
+        for emp in current_members:
+            assign_document_to_employee(db, document, emp["id"])
+
+    for item in existing_items:
+        if item["template_id"] not in selected_ids:
+            db.execute("DELETE FROM onboarding_template_items WHERE id = ?", (item["id"],))
 
     db.commit()
-    flash("Document assigned.", "success")
-    return redirect(url_for("document_audit", document_id=document_id) + "#assign")
+    flash("Onboarding checklist membership updated.", "success")
+    return redirect(url_for("document_audit", document_id=document_id) + "#onboarding")
 
 
 @app.route("/admin/documents/<int:document_id>")
@@ -1862,20 +1883,14 @@ def document_audit(document_id):
         return redirect(url_for("admin_documents"))
 
     step_type = "upload" if document["requires_upload"] else "document"
-    assigned_ids = {
-        row["employee_id"]
+    templates = db.execute("SELECT * FROM onboarding_templates ORDER BY name").fetchall()
+    linked_template_ids = {
+        row["template_id"]
         for row in db.execute(
-            "SELECT employee_id FROM onboarding_steps WHERE step_type = ? AND related_id = ?",
+            "SELECT template_id FROM onboarding_template_items WHERE step_type = ? AND related_id = ?",
             (step_type, document_id),
         ).fetchall()
     }
-    unassigned = [
-        e
-        for e in db.execute(
-            "SELECT * FROM employees WHERE role = 'Employee' ORDER BY name"
-        ).fetchall()
-        if e["id"] not in assigned_ids
-    ]
 
     if document["requires_upload"]:
         uploaded = db.execute(
@@ -1899,7 +1914,8 @@ def document_audit(document_id):
             document=document,
             uploaded=uploaded,
             not_uploaded=not_uploaded,
-            unassigned=unassigned,
+            templates=templates,
+            linked_template_ids=linked_template_ids,
         )
 
     signed = db.execute(
@@ -1921,7 +1937,8 @@ def document_audit(document_id):
         document=document,
         signed=signed,
         unsigned=unsigned,
-        unassigned=unassigned,
+        templates=templates,
+        linked_template_ids=linked_template_ids,
     )
 
 

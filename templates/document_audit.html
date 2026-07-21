@@ -13,7 +13,7 @@
   <div class="tab-buttons">
     <button type="button" class="tab-btn active" data-tab="overview">Overview</button>
     <button type="button" class="tab-btn" data-tab="onboarding">Onboarding</button>
-    <button type="button" class="tab-btn" data-tab="assign">Assign &amp; Status</button>
+    <button type="button" class="tab-btn" data-tab="status">Status</button>
     {% if can('documents_delete') %}
     <button type="button" class="tab-btn" data-tab="danger">Danger Zone</button>
     {% endif %}
@@ -77,39 +77,30 @@
         {% endif %}
       </form>
     </div>
+
+    <div class="card" style="max-width:520px;">
+      <h3>Onboarding Checklists (Groups)</h3>
+      <p class="form-hint">Instead of (or in addition to) Standard Onboarding above, assign this to just one job-specific group by checking its onboarding checklist. Everyone currently on that checklist gets it right away, and so will every future hire on it.</p>
+      {% if templates %}
+      <form method="post" action="{{ url_for('update_document_checklists', document_id=document.id) }}">
+        {% for t in templates %}
+          <div class="checkbox-row" style="margin-bottom:0.5rem;">
+            <input type="checkbox" id="tpl_{{ t.id }}" name="template_ids" value="{{ t.id }}" {% if t.id in linked_template_ids %}checked{% endif %}>
+            <label for="tpl_{{ t.id }}" style="font-weight:400;">{{ t.name }}</label>
+          </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary btn-small">Save</button>
+      </form>
+      {% else %}
+        <p class="empty-state">No onboarding checklists yet. <a href="{{ url_for('onboarding_templates_list') }}">Create one in Settings</a> — that's the "group" this document can be assigned to.</p>
+      {% endif %}
+    </div>
     {% else %}
       <p class="empty-state">You don't have permission to manage onboarding settings for this document.</p>
     {% endif %}
   </div>
 
-  <div class="tab-panel" data-tab="assign">
-    {% if can('documents_assign') %}
-    <div class="card" style="max-width:640px;">
-      <h3>Assign Document</h3>
-      <p class="form-hint">Assign this to everyone, or just the employees who actually need it — e.g. a specific team or job.</p>
-      <form method="post" action="{{ url_for('assign_document', document_id=document.id) }}">
-        <div class="checkbox-row form-group">
-          <input type="checkbox" id="assign_all" name="assign_all">
-          <label for="assign_all">Assign to all current employees</label>
-        </div>
-        {% if unassigned %}
-        <div class="form-group">
-          <label>Or select individually (your group)</label>
-          {% for emp in unassigned %}
-            <div class="checkbox-row" style="margin-bottom:0.4rem;">
-              <input type="checkbox" id="emp_{{ emp.id }}" name="employee_ids" value="{{ emp.id }}">
-              <label for="emp_{{ emp.id }}" style="font-weight:400;">{{ emp.name }} ({{ emp.email }})</label>
-            </div>
-          {% endfor %}
-        </div>
-        {% else %}
-          <p class="form-hint">All employees are already assigned.</p>
-        {% endif %}
-        <button type="submit" class="btn btn-primary">Assign</button>
-      </form>
-    </div>
-    {% endif %}
-
+  <div class="tab-panel" data-tab="status">
     {% if document.requires_upload %}
     <div class="card-grid">
       <div class="card">
