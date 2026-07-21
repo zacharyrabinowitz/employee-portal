@@ -20,6 +20,22 @@ function renderSlideCaptionFields(input, containerId) {
   });
 }
 
+var navToggle = document.getElementById('navbar-toggle');
+if (navToggle) {
+  navToggle.addEventListener('click', function () {
+    var navbar = navToggle.closest('.navbar');
+    var open = navbar.classList.toggle('navbar-open');
+    navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  document.querySelectorAll('.navbar-links a').forEach(function (link) {
+    link.addEventListener('click', function () {
+      var navbar = navToggle.closest('.navbar');
+      navbar.classList.remove('navbar-open');
+      navToggle.setAttribute('aria-expanded', 'false');
+    });
+  });
+}
+
 document.querySelectorAll('.tabs').forEach(function (root) {
   var buttons = root.querySelectorAll('.tab-btn');
   var panels = root.querySelectorAll('.tab-panel');

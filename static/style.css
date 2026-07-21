@@ -121,6 +121,28 @@ a:hover {
   color: var(--error);
 }
 
+.navbar-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.navbar-toggle span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  margin: 0 auto;
+  background: var(--text);
+}
+
 /* ---------- Layout ---------- */
 
 .container {
@@ -1023,30 +1045,49 @@ details > summary::marker {
   }
 
   .navbar {
-    flex-direction: column;
-    align-items: stretch;
-    padding: 0.65rem 1rem;
-    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    position: relative;
   }
 
-  .navbar-brand {
-    justify-content: center;
+  .navbar-toggle {
+    display: flex;
+  }
+
+  .navbar-links,
+  .navbar-user {
+    display: none;
+    width: 100%;
+  }
+
+  .navbar-open .navbar-links,
+  .navbar-open .navbar-user {
+    display: flex;
   }
 
   .navbar-links {
-    justify-content: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: 0.15rem;
+    order: 3;
   }
 
   .navbar-links a {
-    padding: 0.45rem 0.55rem;
-    font-size: 0.85rem;
+    padding: 0.75rem 0.65rem;
+    font-size: 0.95rem;
+    border-radius: 8px;
   }
 
   .navbar-user {
-    justify-content: center;
-    flex-wrap: wrap;
+    order: 4;
+    flex-direction: column;
+    align-items: stretch;
     gap: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .navbar-user .logout-link {
+    padding: 0.6rem 0.65rem;
   }
 
   .page-header {
@@ -1077,6 +1118,10 @@ details > summary::marker {
     width: 100%;
   }
 
+  .btn-row .btn {
+    flex: 1 1 auto;
+  }
+
   .auth-card {
     padding: 1.5rem;
   }
@@ -1084,6 +1129,96 @@ details > summary::marker {
   .filmstrip-thumb,
   .filmstrip-add {
     width: 120px;
+  }
+
+  /* Bigger touch targets */
+  .btn,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="date"],
+  input[type="number"],
+  select,
+  textarea {
+    min-height: 44px;
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    width: 20px;
+    height: 20px;
+  }
+
+  .big-tile-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Scroll hint on wide tables that still need horizontal scroll */
+  .table-scroll {
+    position: relative;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -1.1rem;
+    padding: 0 1.1rem;
+  }
+
+  /* Card-style tables: rows become stacked cards instead of a scrolling grid */
+  table.responsive-table thead {
+    display: none;
+  }
+
+  table.responsive-table,
+  table.responsive-table tbody,
+  table.responsive-table tr,
+  table.responsive-table td {
+    display: block;
+    width: 100%;
+    white-space: normal;
+  }
+
+  table.responsive-table tr {
+    margin-bottom: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.6rem 0.75rem;
+  }
+
+  table.responsive-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.45rem 0;
+    border: none;
+    border-bottom: 1px solid var(--bg);
+    text-align: right;
+  }
+
+  table.responsive-table td:last-child {
+    border-bottom: none;
+  }
+
+  table.responsive-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-align: left;
+    margin-right: auto;
+  }
+
+  table.responsive-table td:empty::before {
+    content: none;
+  }
+
+  /* Progress bars need their own row, not squeezed next to the label */
+  table.responsive-table td:has(.progress-track) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  table.responsive-table td:has(.progress-track)::before {
+    margin-bottom: 0.3rem;
   }
 }
 
@@ -1106,5 +1241,22 @@ details > summary::marker {
 
   .auth-logo {
     max-width: 170px;
+  }
+
+  .big-tile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .big-tile {
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 1rem;
+    gap: 0.85rem;
+  }
+
+  .big-tile-icon {
+    font-size: 1.9rem;
+    margin-bottom: 0;
   }
 }

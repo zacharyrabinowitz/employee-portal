@@ -579,6 +579,48 @@ def training_progress(db, employee_id):
     return assignments, completed, total, pct
 
 
+def get_at_a_glance_alerts(db):
+    """Employees stuck mid-onboarding past the configured threshold, and employees
+    whose most recent attempt on a quiz was a fail (haven't passed it since)."""
+    try:
+        threshold_days = int(get_setting(db, "stuck_onboarding_days", "7"))
+    except ValueError:
+        threshold_days = 7
+
+    stuck_onboarding = []
+    active_employees = db.execute(
+        "SELECT * FROM employees WHERE status = 'Active' ORDER BY created_at"
+    ).fetchall()
+    for emp in active_employees:
+        try:
+            started = datetime.strptime(emp["created_at"][:19], "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            continue
+        days_in = (datetime.utcnow() - started).days
+        if days_in < threshold_days:
+            continue
+        _, _, _, pct = onboarding_progress(db, emp["id"])
+        if pct < 100:
+            stuck_onboarding.append({"employee": emp, "days": days_in, "pct": pct})
+
+    failed_quizzes = db.execute(
+        """SELECT qa.id, qa.employee_id, e.name AS employee_name, qa.quiz_id,
+                  q.title AS quiz_title, qa.submitted_at, qa.score, qa.total
+           FROM quiz_attempts qa
+           JOIN employees e ON e.id = qa.employee_id
+           JOIN quizzes q ON q.id = qa.quiz_id
+           WHERE qa.passed = 0
+             AND e.status != 'Inactive'
+             AND qa.id = (
+                 SELECT MAX(qa2.id) FROM quiz_attempts qa2
+                 WHERE qa2.employee_id = qa.employee_id AND qa2.quiz_id = qa.quiz_id
+             )
+           ORDER BY qa.submitted_at DESC"""
+    ).fetchall()
+
+    return stuck_onboarding, failed_quizzes, threshold_days
+
+
 def assign_module_to_employee(db, module_id, module_title, employee_id):
     """Assign a training module to an employee (training_assignments + a matching
     onboarding checklist step), unless they're already assigned. Returns True if newly assigned."""
@@ -862,6 +904,8 @@ def admin_dashboard():
     quiz_count = db.execute("SELECT COUNT(*) FROM quizzes").fetchone()[0]
     employee_count = len(employees)
 
+    stuck_onboarding, failed_quizzes, stuck_threshold_days = get_at_a_glance_alerts(db)
+
     return render_template(
         "admin_dashboard.html",
         rows=rows,
@@ -869,7 +913,27 @@ def admin_dashboard():
         training_count=training_count,
         quiz_count=quiz_count,
         employee_count=employee_count,
+        stuck_onboarding=stuck_onboarding,
+        failed_quizzes=failed_quizzes,
+        stuck_threshold_days=stuck_threshold_days,
     )
+
+
+@app.route("/admin/dashboard/alert-threshold", methods=["POST"])
+def update_stuck_onboarding_threshold():
+    resp = require_admin_or_manager()
+    if resp:
+        return resp
+
+    db = get_db()
+    try:
+        days = max(1, int(request.form.get("days", "7")))
+    except ValueError:
+        days = 7
+    set_setting(db, "stuck_onboarding_days", str(days))
+    db.commit()
+    flash(f"Alert threshold set to {days} day(s).", "success")
+    return redirect(url_for("admin_dashboard"))
 
 
 @app.route("/admin/employees/add", methods=["GET", "POST"])

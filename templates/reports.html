@@ -67,11 +67,11 @@
     <div class="card">
       <h3>Results ({{ rows|length }})</h3>
       {% if rows %}
-      <table>
+      <table class="responsive-table">
         <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in rows %}
-          <tr>{% for key, label in columns %}<td>{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
+          <tr>{% for key, label in columns %}<td data-label="{{ label }}">{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>
@@ -144,11 +144,11 @@
     <div class="card">
       <h3>Results ({{ rows|length }})</h3>
       {% if rows %}
-      <table>
+      <table class="responsive-table">
         <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in rows %}
-          <tr>{% for key, label in columns %}<td>{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
+          <tr>{% for key, label in columns %}<td data-label="{{ label }}">{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>
@@ -209,11 +209,11 @@
     <div class="card">
       <h3>Results ({{ rows|length }})</h3>
       {% if rows %}
-      <table>
+      <table class="responsive-table">
         <thead><tr>{% for key, label in columns %}<th>{{ label }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for row in rows %}
-          <tr>{% for key, label in columns %}<td>{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
+          <tr>{% for key, label in columns %}<td data-label="{{ label }}">{{ row[key] if row[key] is not none else '' }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>

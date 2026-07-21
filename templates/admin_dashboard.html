@@ -11,6 +11,44 @@
   {% endif %}
 </div>
 
+{% if stuck_onboarding or failed_quizzes %}
+<div class="card" style="border-color:var(--error); background:var(--error-bg);">
+  <h3 style="margin-top:0;">⚠️ At a Glance</h3>
+
+  {% if stuck_onboarding %}
+  <p class="form-hint" style="margin-bottom:0.4rem;"><strong>Stuck mid-onboarding</strong> — active {{ stuck_threshold_days }}+ days, checklist not complete:</p>
+  <ul style="margin:0 0 1rem; padding-left:1.2rem;">
+    {% for item in stuck_onboarding %}
+    <li>
+      <a href="{{ url_for('employee_profile_admin', employee_id=item.employee.id) }}">{{ item.employee.name }}</a>
+      — {{ item.days }} day(s) in, {{ item.pct }}% complete
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if failed_quizzes %}
+  <p class="form-hint" style="margin-bottom:0.4rem;"><strong>Failed a quiz, not retaken since:</strong></p>
+  <ul style="margin:0 0 1rem; padding-left:1.2rem;">
+    {% for fq in failed_quizzes %}
+    <li>
+      <a href="{{ url_for('employee_profile_admin', employee_id=fq.employee_id) }}">{{ fq.employee_name }}</a>
+      — {{ fq.quiz_title }} ({{ fq.score }}/{{ fq.total }})
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <details>
+    <summary class="form-hint" style="cursor:pointer;">Change the stuck-onboarding threshold ({{ stuck_threshold_days }} days)</summary>
+    <form method="post" action="{{ url_for('update_stuck_onboarding_threshold') }}" class="btn-row" style="margin-top:0.6rem; align-items:center;">
+      <input type="number" name="days" min="1" value="{{ stuck_threshold_days }}" style="max-width:90px;">
+      <button type="submit" class="btn btn-secondary btn-small">Update</button>
+    </form>
+  </details>
+</div>
+{% endif %}
+
 <div class="big-tile-grid">
   <a class="big-tile" href="#employee-table">
     <div class="big-tile-icon">👥</div>
@@ -61,7 +99,7 @@
   <div class="form-group" style="max-width:400px;">
     <input type="text" id="employee-search" placeholder="Search by name, email, job title, department...">
   </div>
-  <table>
+  <table class="responsive-table">
     <thead>
       <tr>
         <th>Name</th>
@@ -76,10 +114,10 @@
     <tbody>
       {% for row in rows %}
       <tr data-search="{{ (row.employee.name ~ ' ' ~ row.employee.email ~ ' ' ~ (row.employee.username or '') ~ ' ' ~ (row.employee.job_title or '') ~ ' ' ~ (row.employee.department or '')) | lower }}">
-        <td><a href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">{{ row.employee.name }}</a></td>
-        <td>{{ row.employee.role }}</td>
-        <td>{{ row.employee.hire_date or '—' }}</td>
-        <td>
+        <td data-label="Name"><a href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">{{ row.employee.name }}</a></td>
+        <td data-label="Role">{{ row.employee.role }}</td>
+        <td data-label="Hire Date">{{ row.employee.hire_date or '—' }}</td>
+        <td data-label="Status">
           {% if row.employee.status == 'Active' %}
             <span class="badge badge-success">Active</span>
           {% elif row.employee.status == 'Pending' %}
@@ -88,15 +126,15 @@
             <span class="badge badge-muted">Inactive</span>
           {% endif %}
         </td>
-        <td style="min-width:120px;">
+        <td data-label="Onboarding" style="min-width:120px;">
           <div class="progress-label"><span>{{ row.onboarding_pct }}%</span></div>
           <div class="progress-track"><div class="progress-fill" style="width:{{ row.onboarding_pct }}%;"></div></div>
         </td>
-        <td style="min-width:120px;">
+        <td data-label="Training" style="min-width:120px;">
           <div class="progress-label"><span>{{ row.training_pct }}%</span></div>
           <div class="progress-track"><div class="progress-fill" style="width:{{ row.training_pct }}%;"></div></div>
         </td>
-        <td><a class="btn btn-secondary btn-small" href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">View</a></td>
+        <td data-label=""><a class="btn btn-secondary btn-small" href="{{ url_for('employee_profile_admin', employee_id=row.employee.id) }}">View</a></td>
       </tr>
       {% endfor %}
     </tbody>
