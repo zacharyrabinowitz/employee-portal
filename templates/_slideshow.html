@@ -3,7 +3,12 @@
   <div class="slideshow-viewport">
     {% for slide in slides %}
     <div class="slide{{ ' active' if loop.first else '' }}">
-      {% if slide.media_kind == 'video' %}
+      {% if slide.media_kind == 'video_link' %}
+        <div class="video-embed-wrap">
+          <iframe src="{{ slide.video_url }}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        </div>
+        {% if slide.caption %}<p class="slide-caption">{{ slide.caption }}</p>{% endif %}
+      {% elif slide.media_kind == 'video' %}
         <video controls style="max-width:100%; max-height:50vh; border-radius:6px;">
           <source src="{{ url_for('training_slide_media', slide_id=slide.id) }}" type="{{ slide.media_mimetype }}">
           Your browser doesn't support embedded video.

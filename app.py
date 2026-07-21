@@ -110,6 +110,25 @@ def save_slides(db, module_id, files, captions=None):
     return added
 
 
+VIDEO_EMBED_PATTERNS = [
+    (re.compile(r"(?:share\.vidyard\.com/watch|play\.vidyard\.com)/([A-Za-z0-9_-]+)"), "https://play.vidyard.com/{}.html"),
+    (re.compile(r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([A-Za-z0-9_-]+)"), "https://www.youtube.com/embed/{}"),
+    (re.compile(r"(?:player\.)?vimeo\.com/(?:video/)?(\d+)"), "https://player.vimeo.com/video/{}"),
+    (re.compile(r"loom\.com/(?:share|embed)/([A-Za-z0-9]+)"), "https://www.loom.com/embed/{}"),
+]
+
+
+def video_embed_url(url):
+    """Convert a pasted video share link (Vidyard, YouTube, Vimeo, Loom) into its
+    embeddable iframe URL. Any other link is used as-is."""
+    url = url.strip()
+    for pattern, template in VIDEO_EMBED_PATTERNS:
+        m = pattern.search(url)
+        if m:
+            return template.format(m.group(1))
+    return url
+
+
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 DEFAULT_ONBOARDING_HEADING = "Welcome, {name}"
@@ -2342,6 +2361,39 @@ def add_training_slides(module_id):
     else:
         flash("No valid images were uploaded. Allowed: PNG, JPG, GIF, WEBP.", "error")
 
+    return redirect(url_for("training_detail_admin", module_id=module_id) + "#slides")
+
+
+@app.route("/admin/training/<int:module_id>/slides/video-link", methods=["POST"])
+def add_slide_video_link(module_id):
+    resp = require_permission("training_slides")
+    if resp:
+        return resp
+
+    db = get_db()
+    module = db.execute("SELECT id FROM training_modules WHERE id = ?", (module_id,)).fetchone()
+    if module is None:
+        flash("Training module not found.", "error")
+        return redirect(url_for("admin_training"))
+
+    video_url = request.form.get("video_url", "").strip()
+    caption = request.form.get("caption", "").strip() or None
+    if not video_url.lower().startswith(("http://", "https://")):
+        flash("Please paste a full video link (starting with https://).", "error")
+        return redirect(url_for("training_detail_admin", module_id=module_id) + "#slides")
+
+    embed_url = video_embed_url(video_url)
+    max_order = db.execute(
+        "SELECT COALESCE(MAX(sort_order), -1) FROM training_slides WHERE module_id = ?",
+        (module_id,),
+    ).fetchone()[0]
+    db.execute(
+        """INSERT INTO training_slides (module_id, image_path, caption, sort_order, media_kind, video_url)
+           VALUES (?, '', ?, ?, 'video_link', ?)""",
+        (module_id, caption, max_order + 1, embed_url),
+    )
+    db.commit()
+    flash("Video link added — it'll play right on this page.", "success")
     return redirect(url_for("training_detail_admin", module_id=module_id) + "#slides")
 
 

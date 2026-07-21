@@ -339,6 +339,10 @@ def migrate():
         conn.execute("UPDATE documents SET is_onboarding = 1")
         print("Added documents.is_onboarding (existing documents kept as \"required for everyone\")")
 
+    if not column_exists(conn, "training_slides", "video_url"):
+        conn.execute("ALTER TABLE training_slides ADD COLUMN video_url TEXT")
+        print("Added training_slides.video_url (linked video slides, e.g. Vidyard/YouTube)")
+
     if table_exists(conn, "role_permissions"):
         # New granular permission bolted onto the existing Documents category —
         # anyone who could already edit documents keeps full document management,

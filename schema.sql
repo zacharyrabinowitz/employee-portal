@@ -113,6 +113,7 @@ CREATE TABLE training_slides (
     media_data BLOB,
     media_mimetype TEXT,
     media_kind TEXT,
+    video_url TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
