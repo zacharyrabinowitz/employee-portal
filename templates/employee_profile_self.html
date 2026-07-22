@@ -44,7 +44,7 @@
     <div class="list-item">
       <div class="list-item-info">
         <strong>{{ sig.document_title }}</strong>
-        <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }}</span>
+        <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at | eastern }}</span>
       </div>
       <a class="btn btn-secondary btn-small" href="{{ url_for('document_sign', document_id=sig.document_id) }}">View</a>
     </div>
@@ -61,9 +61,9 @@
         <strong>{{ a.title }}</strong>
         <span>
           {% if a.completed_at %}
-            Completed {{ a.completed_at }}
+            Completed {{ a.completed_at | eastern }}
           {% else %}
-            Assigned {{ a.assigned_at }}
+            Assigned {{ a.assigned_at | eastern }}
           {% endif %}
         </span>
       </div>

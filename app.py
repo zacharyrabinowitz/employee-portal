@@ -14,6 +14,7 @@ import threading
 import time
 import zipfile
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import migrate as db_migrate
 
@@ -56,6 +57,31 @@ app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  # 200 MB (backup imports c
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(EMPLOYEE_UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TRAINING_SLIDES_FOLDER, exist_ok=True)
+
+EASTERN_TZ = ZoneInfo("America/New_York")
+
+
+def to_eastern(value, fmt="%b %d, %Y %I:%M %p %Z"):
+    """Every timestamp is stored in UTC (SQLite's `datetime('now')` and Python's
+    `datetime.utcnow()` both default to UTC). Convert to US/Eastern for display,
+    correctly handling the EST/EDT switch — never touches what's stored."""
+    if not value:
+        return ""
+    text = str(value).strip()
+    try:
+        if text.endswith("Z"):
+            dt = datetime.fromisoformat(text[:-1])
+        elif "T" in text:
+            dt = datetime.fromisoformat(text)
+        else:
+            dt = datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return value
+    dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(EASTERN_TZ).strftime(fmt)
+
+
+app.jinja_env.filters["eastern"] = to_eastern
 
 ADMIN_ROLES = ("Admin", "Manager")
 
@@ -4884,12 +4910,26 @@ def audit_log_list():
     if endpoint:
         where.append("endpoint = ?")
         params.append(endpoint)
+    # date_from/date_to come from a plain <input type="date"> picker, so they're
+    # calendar dates in the admin's Eastern-time day — convert those day
+    # boundaries to UTC before comparing against created_at (stored in UTC),
+    # otherwise results near midnight would be off by the UTC/Eastern offset.
     if date_from:
-        where.append("created_at >= ?")
-        params.append(date_from)
+        try:
+            start_local = datetime.strptime(date_from, "%Y-%m-%d").replace(tzinfo=EASTERN_TZ)
+            where.append("created_at >= ?")
+            params.append(start_local.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            pass
     if date_to:
-        where.append("created_at <= ?")
-        params.append(date_to + " 23:59:59")
+        try:
+            end_local = datetime.strptime(date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=EASTERN_TZ
+            )
+            where.append("created_at <= ?")
+            params.append(end_local.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            pass
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -5000,6 +5040,7 @@ def get_report_rows(db, report_type, args):
             _, _, _, training_pct = training_progress(db, emp["id"])
             row["onboarding_pct"] = onboarding_pct
             row["training_pct"] = training_pct
+            row["created_at"] = to_eastern(row["created_at"])
             rows.append(row)
         return rows
 
@@ -5033,7 +5074,7 @@ def get_report_rows(db, report_type, args):
                     ),
                     "step_type": step["step_type"],
                     "status": "Complete" if step["completed_at"] else "Pending",
-                    "completed_at": step["completed_at"] or "",
+                    "completed_at": to_eastern(step["completed_at"]),
                 }
             )
         return rows
@@ -5067,7 +5108,7 @@ def get_report_rows(db, report_type, args):
                     "total": a["total"],
                     "pct": pct,
                     "passed": "Yes" if a["passed"] else "No",
-                    "submitted_at": a["submitted_at"],
+                    "submitted_at": to_eastern(a["submitted_at"]),
                 }
             )
         return rows
@@ -5234,7 +5275,7 @@ def list_backup_files():
                 "filename": fname,
                 "size": stat.st_size,
                 "mtime": stat.st_mtime,
-                "created": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %I:%M %p"),
+                "created": datetime.fromtimestamp(stat.st_mtime, tz=EASTERN_TZ).strftime("%Y-%m-%d %I:%M %p %Z"),
             }
         )
     items.sort(key=lambda x: x["mtime"], reverse=True)

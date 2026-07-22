@@ -109,7 +109,7 @@
           <div class="list-item">
             <div class="list-item-info">
               <strong>{{ up.employee_name }}</strong>
-              <span>Uploaded on {{ up.uploaded_at }}</span>
+              <span>Uploaded on {{ up.uploaded_at | eastern }}</span>
             </div>
             <div class="btn-row">
               <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=up.id) }}" target="_blank" rel="noopener">View File</a>
@@ -142,7 +142,7 @@
           <div class="list-item">
             <div class="list-item-info">
               <strong>{{ sig.employee_name }}</strong>
-              <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at }} from {{ sig.session_marker }}</span>
+              <span>Signed "{{ sig.signature_text }}" on {{ sig.signed_at | eastern }} from {{ sig.session_marker }}</span>
             </div>
             {% if can('documents_signatures') %}
             <form method="post" action="{{ url_for('delete_signature', signature_id=sig.id) }}" onsubmit="return confirm('Remove this signature? Their checklist step will become pending again.');">

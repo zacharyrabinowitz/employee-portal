@@ -21,7 +21,7 @@
           {% if row.slide_count %}<span class="badge badge-muted">{{ row.slide_count }} slide(s)</span>{% endif %}
           {% if row.module.is_onboarding %}<span class="badge badge-success">Standard onboarding</span>{% endif %}
         </strong>
-        <span>{{ row.completed_count }} / {{ row.assigned_count }} completed · Created {{ row.module.created_at }}</span>
+        <span>{{ row.completed_count }} / {{ row.assigned_count }} completed · Created {{ row.module.created_at | eastern }}</span>
       </div>
       <div class="btn-row">
         {% if can('training_assign') %}

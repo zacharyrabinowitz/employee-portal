@@ -60,10 +60,10 @@
         </strong>
         <span>
           {% if row.document.requires_upload %}
-            {{ row.signed_count }} upload(s) received · Created {{ row.document.created_at }}
+            {{ row.signed_count }} upload(s) received · Created {{ row.document.created_at | eastern }}
           {% else %}
             {% if row.document.requires_signature %}Requires signature ·{% endif %}
-            {{ row.signed_count }} signature(s) on file · Created {{ row.document.created_at }}
+            {{ row.signed_count }} signature(s) on file · Created {{ row.document.created_at | eastern }}
           {% endif %}
         </span>
       </div>

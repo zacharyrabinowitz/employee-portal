@@ -64,7 +64,7 @@
       <div class="list-item-info">
         <strong>{{ entry.action_label }}</strong>
         <span>
-          {{ entry.actor_name or 'Anonymous' }} ({{ entry.actor_role or '—' }}) · {{ entry.created_at }}
+          {{ entry.actor_name or 'Anonymous' }} ({{ entry.actor_role or '—' }}) · {{ entry.created_at | eastern }}
           {% if entry.entity_summary %} · {{ entry.entity_summary }}{% endif %}
         </span>
       </div>

@@ -29,7 +29,7 @@
   {% endif %}
 
   {% if signature %}
-    <p class="badge badge-success">Signed as "{{ signature.signature_text }}" on {{ signature.signed_at }}</p>
+    <p class="badge badge-success">Signed as "{{ signature.signature_text }}" on {{ signature.signed_at | eastern }}</p>
   {% else %}
     <form method="post" action="{{ url_for('document_sign', document_id=document.id) }}">
       <div class="form-group">

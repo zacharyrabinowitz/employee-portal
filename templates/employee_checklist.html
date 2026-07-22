@@ -20,7 +20,7 @@
         <strong>{{ step.step_name }}</strong>
         <span>
           {% if step.completed_at %}
-            Completed {{ step.completed_at }}
+            Completed {{ step.completed_at | eastern }}
           {% else %}
             Not yet completed
           {% endif %}
@@ -79,7 +79,7 @@
     <div class="list-item">
       <div class="list-item-info">
         <strong>{{ upload.label }}</strong>
-        <span>Uploaded {{ upload.uploaded_at }}</span>
+        <span>Uploaded {{ upload.uploaded_at | eastern }}</span>
       </div>
       <div class="btn-row">
         <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=upload.id) }}" target="_blank" rel="noopener">View</a>

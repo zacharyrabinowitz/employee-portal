@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>{{ attempt.employee_name }}</h1>
-    <p class="page-subtitle">{{ quiz.title }} · Attempted {{ attempt.submitted_at }}</p>
+    <p class="page-subtitle">{{ quiz.title }} · Attempted {{ attempt.submitted_at | eastern }}</p>
   </div>
   <a class="btn btn-secondary" href="{{ url_for('quiz_results', quiz_id=quiz.id) }}">Back to Results</a>
 </div>

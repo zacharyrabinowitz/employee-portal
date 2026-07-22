@@ -16,7 +16,7 @@
       <a class="list-item" href="{{ url_for('quiz_attempt_detail', attempt_id=attempt.id) }}" style="text-decoration:none; color:inherit; cursor:pointer;">
         <div class="list-item-info">
           <strong>{{ attempt.employee_name }}</strong>
-          <span>{{ attempt.score }}/{{ attempt.total }} on {{ attempt.submitted_at }}</span>
+          <span>{{ attempt.score }}/{{ attempt.total }} on {{ attempt.submitted_at | eastern }}</span>
         </div>
         {% if attempt.passed %}
           <span class="badge badge-success">Passed</span>

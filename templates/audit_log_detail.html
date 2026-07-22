@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>{{ entry.action_label }}</h1>
-    <p class="page-subtitle">{{ entry.created_at }}</p>
+    <p class="page-subtitle">{{ entry.created_at | eastern }}</p>
   </div>
   <a class="btn btn-secondary" href="{{ url_for('audit_log_list') }}">Back to Audit Log</a>
 </div>

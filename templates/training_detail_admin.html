@@ -218,8 +218,8 @@
                 <span class="badge badge-warning">Assigned</span>
               {% endif %}
             </td>
-            <td>{{ a.assigned_at }}</td>
-            <td>{{ a.completed_at or '—' }}</td>
+            <td>{{ a.assigned_at | eastern }}</td>
+            <td>{{ (a.completed_at | eastern) if a.completed_at else '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>

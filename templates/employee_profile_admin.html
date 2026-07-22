@@ -108,7 +108,7 @@
           {% for a in assignments %}
           <li>
             {% if a.completed_at %}
-              <span class="badge badge-success">Completed {{ a.completed_at }}</span>
+              <span class="badge badge-success">Completed {{ a.completed_at | eastern }}</span>
             {% else %}
               <span class="badge badge-warning">In progress</span>
             {% endif %}
@@ -130,7 +130,7 @@
           <div class="list-item">
             <div class="list-item-info">
               <strong>{{ sig.document_title }}</strong>
-              <span>Signed by "{{ sig.signature_text }}" on {{ sig.signed_at }}</span>
+              <span>Signed by "{{ sig.signature_text }}" on {{ sig.signed_at | eastern }}</span>
             </div>
           </div>
         {% else %}
@@ -144,7 +144,7 @@
           <div class="list-item">
             <div class="list-item-info">
               <strong>{{ upload.label }}</strong>
-              <span>Uploaded {{ upload.uploaded_at }}</span>
+              <span>Uploaded {{ upload.uploaded_at | eastern }}</span>
             </div>
             <div class="btn-row">
               <a class="btn btn-secondary btn-small" href="{{ url_for('employee_upload_file', upload_id=upload.id) }}" target="_blank" rel="noopener">View</a>
@@ -176,7 +176,7 @@
       {% for note in notes %}
         <div class="list-item" style="flex-direction:column; align-items:stretch;">
           <div class="list-item-info">
-            <span>{{ note.author_name }} · {{ note.created_at }}{% if note.updated_at %} (edited {{ note.updated_at }}){% endif %}</span>
+            <span>{{ note.author_name }} · {{ note.created_at | eastern }}{% if note.updated_at %} (edited {{ note.updated_at | eastern }}){% endif %}</span>
             <strong style="font-weight:400; display:block; margin-top:0.25rem;">{{ note.body }}</strong>
           </div>
           {% if can('employees_notes') %}
