@@ -5276,6 +5276,7 @@ def perform_automatic_backup():
             f.write(zip_bytes)
 
         db = sqlite3.connect(DB_PATH)
+        db.row_factory = sqlite3.Row
         try:
             retention_days = int(get_setting(db, "backup_retention_days", "30"))
         except ValueError:

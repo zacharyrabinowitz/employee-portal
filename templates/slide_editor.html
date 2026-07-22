@@ -64,6 +64,8 @@
         <button type="button" class="btn btn-secondary btn-small" id="addTextBtn">+ Add Text</button>
         <button type="button" class="btn btn-secondary btn-small" id="addImageBtn">+ Add Image/Video</button>
         <input type="file" id="imageFileInput" accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.ogg,.mov" style="display:none;">
+        <button type="button" class="btn btn-primary btn-small" id="saveNowBtn">Save</button>
+        <span id="saveStatus" class="save-status">Saved</span>
         <label class="bg-color-label">
           Background
           <input type="color" id="bgColorInput" value="{{ slide.background_color }}">
@@ -93,7 +95,7 @@
           {% endif %}
         {% endfor %}
       </div>
-      <p class="form-hint">Drag an element to move it, drag its bottom-right corner to resize. Click an element to edit its style in the panel.</p>
+      <p class="form-hint">Click text once to select it, click again (or double-click) to type right on the slide. Drag an element to move it, drag its bottom-right corner to resize. Font size/color/bold/alignment are in the panel on the right.</p>
     </div>
 
     <div class="slide-editor-panel">

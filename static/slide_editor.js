@@ -22,16 +22,60 @@
     deleteBtn: document.getElementById('deleteElementBtn')
   };
 
+  var saveStatus = document.getElementById('saveStatus');
+  var saveNowBtn = document.getElementById('saveNowBtn');
+  var saveStatusTimer = null;
+
+  function setSaveStatus(state) {
+    if (!saveStatus) return;
+    clearTimeout(saveStatusTimer);
+    if (state === 'saving') {
+      saveStatus.textContent = 'Saving…';
+      saveStatus.className = 'save-status saving';
+    } else if (state === 'error') {
+      saveStatus.textContent = 'Not saved — check your connection and try again';
+      saveStatus.className = 'save-status error';
+    } else {
+      saveStatus.textContent = 'Saved';
+      saveStatus.className = 'save-status saved';
+      saveStatusTimer = setTimeout(function () {
+        saveStatus.className = 'save-status';
+      }, 2000);
+    }
+  }
+
   function postJSON(url, body) {
+    setSaveStatus('saving');
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {})
-    }).then(function (r) { return r.json(); });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('Request failed: ' + r.status);
+      return r.json();
+    }).then(function (res) {
+      setSaveStatus(res && res.ok === false ? 'error' : 'saved');
+      return res;
+    }).catch(function (err) {
+      console.error(err);
+      setSaveStatus('error');
+      return null;
+    });
   }
 
   function postForm(url, formData) {
-    return fetch(url, { method: 'POST', body: formData }).then(function (r) { return r.json(); });
+    setSaveStatus('saving');
+    return fetch(url, { method: 'POST', body: formData }).then(function (r) {
+      if (!r.ok) throw new Error('Request failed: ' + r.status);
+      return r.json();
+    }).then(function (res) {
+      setSaveStatus(res && res.ok === false ? 'error' : 'saved');
+      return res;
+    }).catch(function (err) {
+      console.error(err);
+      setSaveStatus('error');
+      return null;
+    });
   }
 
   function updateElementUrl(id) {
@@ -41,6 +85,7 @@
   // ---------------- Selection / properties panel ----------------
 
   function selectElement(el) {
+    if (selected && selected !== el) stopEditingText(selected);
     if (selected) selected.classList.remove('selected');
     selected = el;
     if (!selected) {
@@ -72,18 +117,73 @@
     }
   }
 
+  // NOTE: clicking anywhere outside the canvas used to deselect immediately —
+  // including clicks INTO the properties panel itself (the text box, font size,
+  // color picker, etc. all live outside #editorCanvas). That meant clicking the
+  // "Text" field to type wiped `selected` before you could type a single
+  // character, so nothing you typed there ever got attributed to an element
+  // and saved. Exclude the panel from the "click outside" deselect check.
+  var propsPanel = document.querySelector('.slide-editor-panel');
   document.addEventListener('click', function (e) {
-    if (!canvas.contains(e.target)) {
+    if (!canvas.contains(e.target) && !(propsPanel && propsPanel.contains(e.target))) {
       selectElement(null);
     }
   });
+
+  // ---------------- Click-to-edit text directly on the slide ----------------
+  // Clicking a text element only outlined it before, with the actual textbox
+  // tucked away in the side panel — easy to miss and feel like nothing happened.
+  // Now a plain click (not a drag) turns the text on the canvas itself into an
+  // editable box, so typing right there just works.
+
+  function startEditingText(el) {
+    var content = el.querySelector('.el-text-content');
+    if (!content) return;
+    content.contentEditable = 'true';
+    content.style.userSelect = 'text';
+    el.classList.add('editing');
+    content.focus();
+    var range = document.createRange();
+    range.selectNodeContents(content);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function stopEditingText(el) {
+    var content = el.querySelector('.el-text-content');
+    if (!content || content.contentEditable !== 'true') return;
+    content.contentEditable = 'false';
+    content.style.userSelect = '';
+    el.classList.remove('editing');
+    flushTextSave(el);
+  }
+
+  var textDebounceTimers = {};
+  function scheduleTextSave(el) {
+    var id = el.dataset.elementId;
+    clearTimeout(textDebounceTimers[id]);
+    textDebounceTimers[id] = setTimeout(function () { flushTextSave(el); }, 500);
+  }
+
+  function flushTextSave(el) {
+    var id = el.dataset.elementId;
+    clearTimeout(textDebounceTimers[id]);
+    textDebounceTimers[id] = null;
+    var content = el.querySelector('.el-text-content');
+    var text = content ? content.textContent : '';
+    if (selected === el) panel.text.value = text;
+    postJSON(updateElementUrl(id), { content: text });
+  }
 
   // ---------------- Drag + resize ----------------
 
   function attachElementHandlers(el) {
     el.addEventListener('mousedown', function (e) {
       if (e.target.classList.contains('resize-handle')) return;
+      if (el.classList.contains('editing')) return; // let native text editing/selection happen
       e.preventDefault();
+      var wasSelected = selected === el;
       selectElement(el);
 
       var rect = canvas.getBoundingClientRect();
@@ -91,10 +191,12 @@
       var startY = e.clientY;
       var startLeft = parseFloat(el.dataset.posX);
       var startTop = parseFloat(el.dataset.posY);
+      var moved = false;
 
       function onMove(ev) {
         var dxPct = ((ev.clientX - startX) / rect.width) * 100;
         var dyPct = ((ev.clientY - startY) / rect.height) * 100;
+        if (Math.abs(dxPct) > 0.5 || Math.abs(dyPct) > 0.5) moved = true;
         var newLeft = Math.max(0, Math.min(100, startLeft + dxPct));
         var newTop = Math.max(0, Math.min(100, startTop + dyPct));
         el.style.left = newLeft + '%';
@@ -106,10 +208,15 @@
       function onUp() {
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        postJSON(updateElementUrl(el.dataset.elementId), {
-          pos_x: parseFloat(el.dataset.posX),
-          pos_y: parseFloat(el.dataset.posY)
-        });
+        if (moved) {
+          postJSON(updateElementUrl(el.dataset.elementId), {
+            pos_x: parseFloat(el.dataset.posX),
+            pos_y: parseFloat(el.dataset.posY)
+          });
+        } else if (wasSelected && el.dataset.type === 'text') {
+          // A plain click on an already-selected text element: start typing right on the slide.
+          startEditingText(el);
+        }
       }
 
       document.addEventListener('mousemove', onMove);
@@ -153,6 +260,30 @@
         document.addEventListener('mouseup', onUp);
       });
     }
+
+    if (el.dataset.type === 'text') {
+      var content = el.querySelector('.el-text-content');
+      if (content) {
+        content.addEventListener('dblclick', function (e) {
+          e.stopPropagation();
+          if (el.classList.contains('editing')) return;
+          selectElement(el);
+          startEditingText(el);
+        });
+        content.addEventListener('input', function () {
+          scheduleTextSave(el);
+        });
+        content.addEventListener('blur', function () {
+          stopEditingText(el);
+        });
+        content.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            content.blur();
+          }
+        });
+      }
+    }
   }
 
   canvas.querySelectorAll('.canvas-el').forEach(attachElementHandlers);
@@ -166,6 +297,7 @@
     if (contentEl) contentEl.textContent = panel.text.value;
     clearTimeout(textDebounce);
     textDebounce = setTimeout(function () {
+      textDebounce = null;
       postJSON(updateElementUrl(selected.dataset.elementId), { content: panel.text.value });
     }, 400);
   });
@@ -227,6 +359,22 @@
     });
   });
 
+  // ---------------- Explicit Save button ----------------
+
+  if (saveNowBtn) {
+    saveNowBtn.addEventListener('click', function () {
+      if (selected && selected.classList.contains('editing')) {
+        stopEditingText(selected);
+      } else if (selected && selected.dataset.type === 'text') {
+        clearTimeout(textDebounce);
+        textDebounce = null;
+        postJSON(updateElementUrl(selected.dataset.elementId), { content: panel.text.value });
+      } else {
+        setSaveStatus('saved');
+      }
+    });
+  }
+
   // ---------------- Toolbar: add text / add image ----------------
 
   document.getElementById('addTextBtn').addEventListener('click', function () {
@@ -267,6 +415,7 @@
       canvas.appendChild(div);
       attachElementHandlers(div);
       selectElement(div);
+      startEditingText(div);
     });
   });
 
@@ -356,4 +505,15 @@
       });
     });
   }
+
+  // Warn before leaving with a pending debounced save still in flight.
+  window.addEventListener('beforeunload', function (e) {
+    var pending = !!textDebounce || Object.keys(textDebounceTimers).some(function (id) {
+      return !!textDebounceTimers[id];
+    });
+    if (pending) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 })();

@@ -934,6 +934,37 @@ th {
   border: 2px solid var(--primary);
 }
 
+.canvas-el.editing {
+  border: 2px solid var(--primary);
+  box-shadow: 0 0 0 3px rgba(47, 111, 237, 0.2);
+  cursor: text;
+}
+
+.canvas-el.editing .el-text-content {
+  outline: none;
+  cursor: text;
+}
+
+.save-status {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  transition: color 0.15s ease;
+}
+
+.save-status.saving {
+  color: var(--text-muted);
+}
+
+.save-status.saved {
+  color: #1a8a4a;
+  font-weight: 600;
+}
+
+.save-status.error {
+  color: var(--error);
+  font-weight: 600;
+}
+
 .canvas-el img {
   width: 100%;
   height: 100%;
